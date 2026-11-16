@@ -69,8 +69,8 @@ The success check is yours; the bench only fixes how it runs.
 - The case kit (`tools/case-kit`): recording, call envelope, root launcher and collector, verifier helpers, the
   gate, and `sync.py` to vendor them into your task.
 - Harbor runs, CI checks, and review.
-- After your CPU tier is merged, the GPU pool for your GPU tier, granted automatically (see
-  [LADDER.md](LADDER.md)); optionally a real-robot tier on the maintainers' robots.
+- After your CPU tier is merged, the GPU pool for your GPU tier, once the pool opens (see
+  [LADDER.md](LADDER.md)).
 
 ## 5. Building one
 

@@ -53,6 +53,8 @@ Run the same checks locally before pushing; see [docs/CASE.md](CASE.md#5-buildin
 
 ## GPU grant
 
+The GPU pool is not open yet in this repository. What follows describes how it works once it opens.
+
 When the CPU tier of a case has been reviewed and merged into `main`, the GPU pool is granted to its author. The
 author opens the GPU tier as a new pull request on the same task directory and comments `/scene` and `/validate`
 there without waiting for a maintainer.

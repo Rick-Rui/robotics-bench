@@ -110,7 +110,7 @@ task directory ([docs/LADDER.md](docs/LADDER.md)).
 | Tier | Runs on | Required | Access |
 |---|---|---|---|
 | CPU | Standard Docker containers, a CPU engine (for example MuJoCo, PyBullet, or the author's own physics) | Yes, first | Any contributor, with Docker only |
-| GPU | The platform's GPU pool, a GPU engine (for example Isaac Sim) declared by `host/service.json` | Optional, after the CPU tier is merged | Granted automatically to the author of the merged CPU tier |
+| GPU | The platform's GPU pool, a GPU engine (for example Isaac Sim) declared by `host/service.json` | Optional, after the CPU tier is merged | Opening later; then granted to the author of the merged CPU tier |
 
 A new case that runs only on GPUs is not accepted; the CPU tier is the case's entry point and its executable
 specification. Differences between engines (contact, friction, rendering) are resolved by the author in the GPU-tier
@@ -138,7 +138,7 @@ pull request; the two tiers are scored independently. The GPU tier is specified 
 5. **Review.** A domain reviewer and a technical reviewer are assigned automatically; a final reviewer follows. All
    assigned reviewers must approve the current head commit before the pull request can merge
    ([REVIEWING.md](REVIEWING.md)).
-6. **GPU tier (optional).** Once the CPU tier is merged, the GPU pool is granted to its author. Open a second pull
+6. **GPU tier (optional, opening later).** The GPU pool is not open yet in this repository. Once it opens, it is granted to the author of a merged CPU tier. Open a second pull
    request for the GPU tier and use the pull-request commands in [docs/COMMANDS.md](docs/COMMANDS.md) to check the
    scene and validate it on the pool.
 
