@@ -1,0 +1,11 @@
+# Maintainers by path. When a PR touches a matching path, GitHub requests a
+# review from the owners listed here. Whether a PR can merge is still decided by
+# the merge gate (merge-gate/required-approvals, see TASK_REVIEW_AUTOMATION.md),
+# not by this file.
+
+
+# ZIWU GPU pool infrastructure
+/tools/anchor-gpu/              @lwhere1314
+/tools/isaac-remote/            @lwhere1314
+/tools/isaac-model-comparison/  @lwhere1314
+/docs/GPU_TASK_GUIDE.md         @lwhere1314 @yanhuachisha

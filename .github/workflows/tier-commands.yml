@@ -1,0 +1,52 @@
+name: Tier Commands
+
+# One task PR is one tier of one task, and the tier decides which slash commands work on it
+# (docs/COMMANDS.md). The workflows that run the commands skip PRs of other tiers; this one answers
+# a command that does not work on the PR's tier, so it never fails silently.
+#
+# Metadata only: reads the PR's file list through the API; nothing from the PR is checked out.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  reply:
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/') && github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            ci_checks/check-task-tier.py
+            .github/scripts/tier_command.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Answer a command of another tier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          PR_AUTHOR: ${{ github.event.issue.user.login }}
+        run: |
+          # Cheap exit before any API call: most comments hold no command at all.
+          python3 .github/scripts/tier_command.py --tier real > any-real.md
+          python3 .github/scripts/tier_command.py --tier cpu > any-cpu.md
+          if [ ! -s any-real.md ] && [ ! -s any-cpu.md ]; then echo "No tier-specific command"; exit 0; fi
+          ROLE=$(gh api "repos/${REPO}/collaborators/${COMMENT_USER}/permission" --jq '.role_name' 2>/dev/null || echo none)
+          if [ "$COMMENT_USER" != "$PR_AUTHOR" ] && [[ ! "$ROLE" =~ ^(admin|maintain|write)$ ]]; then
+            echo "Not the PR author or a maintainer"; exit 0
+          fi
+          TIER=$(python3 ci_checks/check-task-tier.py "$PR_NUMBER" --repo "$REPO" --tier)
+          [ -n "$TIER" ] || { echo "Not a task PR"; exit 0; }
+          python3 .github/scripts/tier_command.py --tier "$TIER" > reply.md
+          if [ -s reply.md ]; then
+            { echo "@${COMMENT_USER} $(cat reply.md)"; echo; echo "<sub>See [PR commands](https://github.com/${REPO}/blob/main/docs/COMMANDS.md).</sub>"; } > body.md
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file body.md
+          fi

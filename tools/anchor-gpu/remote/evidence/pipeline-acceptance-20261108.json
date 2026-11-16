@@ -1,0 +1,89 @@
+{
+  "schema": "ziwu.cpu-gpu-pipeline-acceptance.v1",
+  "date": "2026-11-08",
+  "kind": "transport-fixture-only",
+  "benchmark_score": false,
+  "server_version": "43ac24166512c993",
+  "enabled_gpus": [
+    0
+  ],
+  "cpu_slots": 2,
+  "cpu_image": "python@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535",
+  "batch_id": "22ab1f9c32e848919256d26613e95e8e",
+  "batch_wall_sec": 111.895,
+  "sum_gpu_occupation_sec": 102.361,
+  "gpu_handoff_gaps_sec": [
+    0.0088,
+    0.0097,
+    0.0114
+  ],
+  "dispatch_order": [
+    "fixture-0",
+    "fixture-1",
+    "fixture-3",
+    "fixture-2"
+  ],
+  "timing_note": "Handoff gaps use only GPU-host timestamps. Occupation includes fresh process startup, simulation and cleanup; it is not measured GPU hardware utilization. CPU and GPU clocks are not compared.",
+  "items": [
+    {
+      "id": "fixture-0",
+      "phase": "final",
+      "job_id": "1856587e961c4ce2b5028ae2464c3211",
+      "request_sha256": "e0bfe177de309e3738413dea142eca9f47b16f5eb645fd4fe7eff9dab064aff9",
+      "assigned_gpu": 0,
+      "state": "succeeded",
+      "score": 0.0,
+      "success": false,
+      "native_pid": 14652,
+      "native_exit_code": 0,
+      "cpu_preparation_sec": 2.114,
+      "gpu_occupation_sec": 32.057,
+      "queue_sec": 0.03
+    },
+    {
+      "id": "fixture-1",
+      "phase": "feedback",
+      "job_id": "1240e82424404ed5b6ae38c45e229e90",
+      "request_sha256": "d2c797a08db858a5cadabc7da1b1818bafeaa8c9b6a65b62d8af779625fd083b",
+      "assigned_gpu": 0,
+      "state": "succeeded",
+      "score": 1.0,
+      "success": true,
+      "native_pid": 15689,
+      "native_exit_code": 0,
+      "cpu_preparation_sec": 1.419,
+      "gpu_occupation_sec": 24.089,
+      "queue_sec": 31.881
+    },
+    {
+      "id": "fixture-2",
+      "phase": "final",
+      "job_id": "2f676aa26416409095085e5301d110b4",
+      "request_sha256": "dd75019d8495ade4ad8951c9ccc7172954d69bc3fd829ca0c63e68c549632a25",
+      "assigned_gpu": 0,
+      "state": "succeeded",
+      "score": 0.0,
+      "success": false,
+      "native_pid": 17773,
+      "native_exit_code": 0,
+      "cpu_preparation_sec": 0.651,
+      "gpu_occupation_sec": 24.614,
+      "queue_sec": 75.827
+    },
+    {
+      "id": "fixture-3",
+      "phase": "feedback",
+      "job_id": "5e77ad14364f4be49de48f117c55ec75",
+      "request_sha256": "94512466d48b2cd9838307cc02c676eb57c119ac0e58f2d4c992474cfcdb9d71",
+      "assigned_gpu": 0,
+      "state": "succeeded",
+      "score": 1.0,
+      "success": true,
+      "native_pid": 16697,
+      "native_exit_code": 0,
+      "cpu_preparation_sec": 1.076,
+      "gpu_occupation_sec": 21.601,
+      "queue_sec": 22.054
+    }
+  ]
+}

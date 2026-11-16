@@ -1,0 +1,845 @@
+name: Validate Task
+
+# Runs execution checks (similarity, Docker build, oracle/nop validation)
+# only when a maintainer explicitly requests them with a /validate comment,
+# or when the author of a GPU-tier PR whose task's CPU tier they got merged
+# into main does (tools/isaac-remote/gpu_grant.py; 2 per PR per 24 hours).
+# PR-controlled task environments must never run automatically with repository
+# credentials available to the workflow.
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  # Non-`/validate` comments get a per-run group so they don't cancel in-flight runs.
+  # Real `/validate` comments share `validate-<PR>` and cancel older requests.
+  group: >-
+    ${{ (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '/validate'))
+        && format('validate-noop-{0}', github.run_id)
+        || format('validate-{0}', github.event.pull_request.number || github.event.issue.number) }}
+  cancel-in-progress: true
+
+jobs:
+  check-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      pr_number: ${{ steps.check.outputs.pr_number }}
+      overrides: ${{ steps.check.outputs.overrides }}
+    permissions:
+      contents: read  # private repo: read PR files / workflow files / Discussions
+      pull-requests: write  # the acknowledgement that counts an author's /validate against the quota
+    steps:
+      # Trusted code from the default branch: the tier of the PR and the author's GPU grant.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: github.event.issue.pull_request && contains(github.event.comment.body, '/validate')
+        with:
+          sparse-checkout: |
+            ci_checks/check-task-tier.py
+            tools/isaac-remote/gpu_grant.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Check trigger conditions
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          COMMENT_USER_TYPE: ${{ github.event.comment.user.type }}
+          PR_AUTHOR: ${{ github.event.issue.user.login }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ISSUE_PR_URL: ${{ github.event.issue.pull_request.html_url }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Slash commands must come from the author's own prose. Ignore markdown that
+          # quotes or displays a command rather than issuing one: fenced code blocks,
+          # blockquotes (re-quoting a comment must not re-run its commands), and inline
+          # code spans (writing `/run` to discuss it is not invoking it). Sanitizing here
+          # also cleans the `overrides` output parse-config reads, so a quoted or
+          # fenced trials=/agents= cannot leak into a real invocation.
+          COMMENT_BODY=$(printf '%s\n' "$COMMENT_BODY" \
+            | awk 'BEGIN{f=0} /^[[:space:]]*```/{f=!f; next} !f' \
+            | grep -vE '^[[:space:]]*>' \
+            | sed 's/`[^`]*`//g' \
+            || true)
+          if [[ -n "$ISSUE_PR_URL" ]] && [[ "$COMMENT_BODY" == *"/validate"* ]]; then
+            PERMISSION=$(gh api "repos/${REPO}/collaborators/${COMMENT_USER}/permission" --jq '.role_name // .permission' 2>/dev/null || echo "none")
+            if [[ "$PERMISSION" == "admin" || "$PERMISSION" == "maintain" || "$PERMISSION" == "write" ]]; then
+              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "pr_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+              {
+                echo "overrides<<OVERRIDES_EOF"
+                echo "$COMMENT_BODY"
+                echo "OVERRIDES_EOF"
+              } >> $GITHUB_OUTPUT
+              echo "Maintainer triggered /validate"
+            elif [[ "$COMMENT_USER" == "$PR_AUTHOR" && "$COMMENT_USER_TYPE" != "Bot" ]]; then
+              # The author of a GPU tier whose CPU tier they got merged into main (tools/isaac-remote/gpu_grant.py,
+              # docs/LADDER.md): 2 per PR per 24 hours, with no overrides. should_run stays unset until accepted.
+              TIER=$(python3 ci_checks/check-task-tier.py "$ISSUE_NUMBER" --repo "$REPO" --json)
+              if [ "$(jq -r .tier <<< "$TIER")" != "gpu" ] || [ "$(jq '.tasks | length' <<< "$TIER")" != "1" ]; then
+                echo "Author /validate only runs on the GPU tier of one task"; exit 0
+              fi
+              TASK_PATH=$(jq -r .task <<< "$TIER")
+              GRANT=$(python3 tools/isaac-remote/gpu_grant.py check --repo "$REPO" --task-path "$TASK_PATH" --author "$COMMENT_USER" --base "$DEFAULT_BRANCH") \
+                || GRANT='{"granted": false, "reason": "Could not look up the CPU tier of this task."}'
+              if [ "$(jq -r .granted <<< "$GRANT")" != "true" ]; then
+                gh pr comment "$ISSUE_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} \`/validate\` was not run: $(jq -r .reason <<< "$GRANT")" || true
+                exit 0
+              fi
+              QUOTA=$(python3 tools/isaac-remote/gpu_grant.py quota --repo "$REPO" --pr "$ISSUE_NUMBER" --author "$COMMENT_USER" --command validate) \
+                || QUOTA='{"allowed": false, "used": "?", "limit": "?"}'
+              if [ "$(jq -r .allowed <<< "$QUOTA")" != "true" ]; then
+                gh pr comment "$ISSUE_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} An author may trigger \`/validate\` at most $(jq -r .limit <<< "$QUOTA") times per PR in 24 hours; $(jq -r .used <<< "$QUOTA") already used, so this one was not run." || true
+                exit 0
+              fi
+              {
+                echo "@${COMMENT_USER} Starting \`/validate\` ($(jq -r .reason <<< "$GRANT") Author run $(( $(jq -r .used <<< "$QUOTA") + 1 )) of $(jq -r .limit <<< "$QUOTA") in 24 hours.)"
+                echo
+                python3 tools/isaac-remote/gpu_grant.py marker --author "$COMMENT_USER" --command validate
+              } > ack.md
+              gh pr comment "$ISSUE_NUMBER" --repo "$REPO" --body-file ack.md || { echo "Could not record the quota; not running"; exit 0; }
+              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "pr_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+              {
+                echo "overrides<<OVERRIDES_EOF"
+                echo "/validate"
+                echo "OVERRIDES_EOF"
+              } >> $GITHUB_OUTPUT
+              echo "Author of the merged CPU tier triggered /validate"
+            else
+              echo "should_run=false" >> $GITHUB_OUTPUT
+              echo "$COMMENT_USER does not have write access; ignoring /validate"
+            fi
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  parse-config:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      env_backend: ${{ steps.parse.outputs.env_backend }}
+      env_default: ${{ steps.parse.outputs.env_default }}
+      env_override: ${{ steps.parse.outputs.env_override }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: .github/llm-config.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Parse validate_env from config and overrides
+        id: parse
+        env:
+          COMMENT_BODY: ${{ needs.check-trigger.outputs.overrides }}
+        run: |
+          # Repo-wide default backend (llm-config) + any /validate env= override.
+          # The PER-TASK task.toml [environment].validate_env is resolved later, in
+          # the execution-checks matrix job, because a PR can carry several tasks
+          # with different backends. Precedence there: override > task.toml > default.
+          CONFIG_FILE=".github/llm-config.yml"
+          if [ -f "$CONFIG_FILE" ]; then
+            ENV_DEFAULT=$(yq '.harbor_run.validate_env // "docker"' "$CONFIG_FILE")
+          else
+            ENV_DEFAULT="docker"
+          fi
+
+          ENV_OVERRIDE=""
+          if [[ "$COMMENT_BODY" =~ env=([^[:space:]]+) ]]; then
+            ENV_OVERRIDE="${BASH_REMATCH[1]}"
+          fi
+
+          # env_backend kept for back-compat (override wins, else default).
+          ENV_BACKEND="${ENV_OVERRIDE:-$ENV_DEFAULT}"
+          echo "env_backend=$ENV_BACKEND" >> $GITHUB_OUTPUT
+          echo "env_default=$ENV_DEFAULT" >> $GITHUB_OUTPUT
+          echo "env_override=$ENV_OVERRIDE" >> $GITHUB_OUTPUT
+          echo "Validate backend — default: $ENV_DEFAULT, override: ${ENV_OVERRIDE:-(none)}"
+
+  detect-tasks:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      tasks: ${{ steps.detect.outputs.tasks }}
+      has_tasks: ${{ steps.detect.outputs.has_tasks }}
+      gpu_tasks: ${{ steps.detect.outputs.gpu_tasks }}
+      has_gpu_tasks: ${{ steps.detect.outputs.has_gpu_tasks }}
+      all_tasks: ${{ steps.detect.outputs.all_tasks }}
+      head_sha: ${{ steps.detect.outputs.head_sha }}
+      gpu_skipped: ${{ steps.detect.outputs.gpu_skipped }}
+      retired_tasks: ${{ steps.detect.outputs.retired_tasks }}
+      has_retired_tasks: ${{ steps.detect.outputs.has_retired_tasks }}
+      tier: ${{ steps.detect.outputs.tier }}
+    permissions:
+      contents: read  # private repo: read PR files / workflow files / Discussions
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: ci_checks/check-task-tier.py
+          sparse-checkout-cone-mode: false
+          path: trusted
+          persist-credentials: false
+      - name: Detect modified tasks
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ needs.check-trigger.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # The PR's tier (ci_checks/check-task-tier.py, from the paths it changes) decides what
+          # /validate runs: tier:cpu -> docker checks below; tier:gpu -> the GPU pool
+          # (gpu-task-controls.yml: verify -> deploy -> accept); tier:real -> nothing here (real-robot
+          # episodes are started with /real). TIER=gpu marks the GPU tier of a multi-tier task.
+          PR_TIER=$(python3 trusted/ci_checks/check-task-tier.py "$PR_NUMBER" --repo "$REPO" --tier || true)
+          echo "PR tier: ${PR_TIER:-none}"
+          TIER=""
+          if [ "$PR_TIER" = "gpu" ]; then TIER="gpu"; fi
+          echo "tier=$TIER" >> $GITHUB_OUTPUT
+          if [ "$PR_TIER" = "real" ]; then
+            for k in has_tasks has_gpu_tasks has_retired_tasks; do echo "$k=false" >> $GITHUB_OUTPUT; done
+            for k in tasks gpu_tasks all_tasks retired_tasks gpu_skipped; do echo "$k=[]" >> $GITHUB_OUTPUT; done
+            exit 0
+          fi
+          CHANGED_FILES=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
+          CHANGED_TASK_FILES=$(echo "$CHANGED_FILES" | grep -E '^(tasks|lite)/' || true)
+
+          if [ -z "$CHANGED_TASK_FILES" ]; then
+            echo "has_tasks=false" >> $GITHUB_OUTPUT
+            echo "tasks=[]" >> $GITHUB_OUTPUT
+            echo "has_gpu_tasks=false" >> $GITHUB_OUTPUT
+            echo "gpu_tasks=[]" >> $GITHUB_OUTPUT
+            echo "all_tasks=[]" >> $GITHUB_OUTPUT
+            echo "retired_tasks=[]" >> $GITHUB_OUTPUT
+            echo "has_retired_tasks=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # The PR commit at the time of the /validate comment; later pushes need a new /validate.
+          PR_SHA=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')
+          echo "head_sha=$PR_SHA" >> $GITHUB_OUTPUT
+          ALL_TASK_DIRS=$(gh api "repos/${REPO}/git/trees/${PR_SHA}?recursive=1" --jq '.tree[].path' \
+            | grep '/instruction\.md$' \
+            | sed 's|/instruction\.md$||' \
+            | grep -E '^(tasks|lite)/' \
+            | sort -u)
+
+          TASK_DIRS=""
+          while IFS= read -r task_dir; do
+            [ -z "$task_dir" ] && continue
+            if echo "$CHANGED_TASK_FILES" | grep -q "^${task_dir}/"; then
+              TASK_DIRS="${TASK_DIRS}${task_dir}"$'\n'
+            fi
+          done <<< "$ALL_TASK_DIRS"
+
+          TASK_DIRS=$(echo "$TASK_DIRS" | grep -v '^$' | sort -u)
+
+          GPU_SKIPPED=""
+
+          # Tasks on the Robotics-Bench GPU pool (task.toml validate_env = "ziwu-gpu") are
+          # validated by gpu-task-controls.yml, not by the Harbor backends below.
+          # Robotics-Bench no longer uses Modal: a task that still declares
+          # validate_env = "modal" is not run anywhere; the comment asks the
+          # author to migrate it to ziwu-gpu, and execution-checks fails.
+          GPU_TASK_DIRS=""; CPU_TASK_DIRS=""; RETIRED_TASK_DIRS=""
+          while IFS= read -r task_dir; do
+            [ -z "$task_dir" ] && continue
+            BACKEND=$(gh api "repos/${REPO}/contents/${task_dir}/task.toml?ref=${PR_SHA}" --jq '.content' 2>/dev/null \
+              | base64 -d 2>/dev/null \
+              | python3 -c "import sys,tomllib; print(tomllib.loads(sys.stdin.read()).get('environment',{}).get('validate_env') or '')" 2>/dev/null || true)
+            HAS_GPU_TIER=false
+            if [ "$TIER" = "gpu" ] && [ "$BACKEND" != "ziwu-gpu" ] && [ "$BACKEND" != "modal" ] \
+               && gh api "repos/${REPO}/contents/${task_dir}/host/service.json?ref=${PR_SHA}" --silent 2>/dev/null \
+               && gh api "repos/${REPO}/contents/${task_dir}/gpu/instruction-gpu.md?ref=${PR_SHA}" --silent 2>/dev/null; then
+              HAS_GPU_TIER=true
+            fi
+            if [ "$BACKEND" = "ziwu-gpu" ] || [ "$HAS_GPU_TIER" = true ]; then
+              GPU_TASK_DIRS="${GPU_TASK_DIRS}${task_dir}"$'\n'
+            elif [ "$BACKEND" = "modal" ]; then
+              RETIRED_TASK_DIRS="${RETIRED_TASK_DIRS}${task_dir}"$'\n'
+            else
+              CPU_TASK_DIRS="${CPU_TASK_DIRS}${task_dir}"$'\n'
+            fi
+          done <<< "$TASK_DIRS"
+          TASK_DIRS="$CPU_TASK_DIRS"
+          GPU_TASKS=$(printf '%s' "$GPU_TASK_DIRS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          RETIRED_TASKS=$(printf '%s' "$RETIRED_TASK_DIRS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          ALL_TASKS=$(printf '%s%s' "$CPU_TASK_DIRS" "$GPU_TASK_DIRS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "all_tasks=$ALL_TASKS" >> $GITHUB_OUTPUT
+          echo "retired_tasks=$RETIRED_TASKS" >> $GITHUB_OUTPUT
+          if [ "$RETIRED_TASKS" = "[]" ]; then
+            echo "has_retired_tasks=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_retired_tasks=true" >> $GITHUB_OUTPUT
+            echo "Tasks on the retired Modal backend (not run): $RETIRED_TASKS"
+          fi
+          echo "gpu_tasks=$GPU_TASKS" >> $GITHUB_OUTPUT
+          if [ "$GPU_TASKS" = "[]" ]; then
+            echo "has_gpu_tasks=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_gpu_tasks=true" >> $GITHUB_OUTPUT
+            echo "GPU pool tasks: $GPU_TASKS"
+          fi
+
+          TASKS=$(printf '%s' "$TASK_DIRS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          GPU_SKIPPED_JSON=$(echo "$GPU_SKIPPED" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+
+          echo "tasks=$TASKS" >> $GITHUB_OUTPUT
+          echo "gpu_skipped=$GPU_SKIPPED_JSON" >> $GITHUB_OUTPUT
+
+          if [ "$TASKS" = "[]" ] || [ -z "$TASKS" ]; then
+            echo "has_tasks=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_tasks=true" >> $GITHUB_OUTPUT
+            echo "Detected tasks: $TASKS"
+          fi
+
+  acknowledge:
+    needs: [check-trigger, detect-tasks]
+    if: >-
+      github.event_name == 'issue_comment'
+      && needs.check-trigger.outputs.should_run == 'true'
+      && (needs.detect-tasks.outputs.has_tasks == 'true' || needs.detect-tasks.outputs.has_gpu_tasks == 'true' || needs.detect-tasks.outputs.has_retired_tasks == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # private repo: read PR files / workflow files / Discussions
+      pull-requests: write
+    steps:
+      - name: Add reaction
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          gh api "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" \
+            -f content='eyes' || true
+
+  post-placeholder:
+    needs: [check-trigger, detect-tasks]
+    if: needs.detect-tasks.outputs.has_tasks == 'true' || needs.detect-tasks.outputs.has_gpu_tasks == 'true' || needs.detect-tasks.outputs.has_retired_tasks == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # private repo: read PR files / workflow files / Discussions
+      pull-requests: write
+    steps:
+      - name: Write placeholder comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.check-trigger.outputs.pr_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          if [ -z "$HEAD_SHA" ]; then
+            HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq '.headRefOid')
+          fi
+          SHORT_SHA="${HEAD_SHA:0:7}"
+          SHA_LINK="https://github.com/${REPO}/commit/${HEAD_SHA}"
+          printf '### Validation ⏳\nRunning...\n\n<sub><a href="%s">Ran</a> on <a href="%s"><code>%s</code></a>. Requested by a maintainer.</sub>\n' \
+            "$RUN_URL" "$SHA_LINK" "$SHORT_SHA" > placeholder.md
+
+      - name: Post placeholder sticky comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: task-validation
+          number: ${{ needs.check-trigger.outputs.pr_number }}
+          path: placeholder.md
+
+  gpu-skip-note:
+    # Every changed task is a GPU task, so nothing auto-validates. Tell the author
+    # how to run it. Shares the `task-validation` sticky header, so a later
+    # `/validate` overwrites this note with real results.
+    needs: [check-trigger, detect-tasks]
+    if: >-
+      needs.detect-tasks.outputs.has_tasks == 'false'
+      && needs.detect-tasks.outputs.gpu_skipped != '[]'
+      && needs.detect-tasks.outputs.gpu_skipped != ''
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Write note
+        env:
+          GPU_SKIPPED: ${{ needs.detect-tasks.outputs.gpu_skipped }}
+        run: |
+          {
+            echo "### Validation ⏭️ skipped (GPU task)"
+            echo ""
+            echo "GPU tasks don't validate automatically — they need a GPU backend."
+            echo "Comment \`/validate\` to run oracle and nop validation."
+            echo ""
+            echo "$GPU_SKIPPED" | jq -r '.[] | "- `" + . + "`"'
+          } > gpu-note.md
+
+      - name: Post sticky comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: task-validation
+          number: ${{ needs.check-trigger.outputs.pr_number }}
+          path: gpu-note.md
+
+  execution-checks:
+    needs: [check-trigger, detect-tasks, parse-config, post-placeholder]
+    if: needs.detect-tasks.outputs.has_tasks == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: ${{ fromJson(needs.detect-tasks.outputs.tasks) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: base
+          persist-credentials: false
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          ref: refs/pull/${{ needs.check-trigger.outputs.pr_number }}/head
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: pr
+          persist-credentials: false
+          # Gated behind check-trigger; opt in to the actions/checkout fork guard.
+          allow-unsafe-pr-checkout: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      # Per-task backend: a /validate env=<backend> override wins; otherwise the
+      # task's own task.toml [environment].validate_env; otherwise the repo-wide
+      # llm-config default. Unknown backends fall back to the default so a task
+      # can't inject an arbitrary value. Modal is retired on Robotics-Bench: tasks
+      # declaring it never reach this job, and an env=modal override is refused.
+      - name: Resolve validation backend for this task
+        id: backend
+        env:
+          ENV_OVERRIDE: ${{ needs.parse-config.outputs.env_override }}
+          ENV_DEFAULT: ${{ needs.parse-config.outputs.env_default }}
+          TASK_PATH: ${{ matrix.task }}
+        run: |
+          ALLOWED="docker daytona e2b runloop gke apple-container tensorlake islo"
+          TASK_ENV=""
+          if [ -f "pr/${TASK_PATH}/task.toml" ]; then
+            TASK_ENV=$(python3 -c "import tomllib; print(tomllib.load(open('pr/${TASK_PATH}/task.toml','rb')).get('environment',{}).get('validate_env') or '')" 2>/dev/null || echo "")
+          fi
+          BACKEND="${ENV_OVERRIDE:-${TASK_ENV:-$ENV_DEFAULT}}"
+          if [ "$BACKEND" = "modal" ]; then
+            echo "::error::Modal is retired on Robotics-Bench. Run CPU tasks on docker and GPU tasks on the Robotics-Bench GPU pool (validate_env = \"ziwu-gpu\", docs/GPU_TASK_GUIDE.md)."
+            exit 1
+          fi
+          case " $ALLOWED " in
+            *" $BACKEND "*) : ;;
+            *)
+              echo "::warning::Unknown validate backend '$BACKEND' for ${TASK_PATH}; falling back to '${ENV_DEFAULT}'"
+              BACKEND="$ENV_DEFAULT" ;;
+          esac
+          echo "backend=$BACKEND" >> "$GITHUB_OUTPUT"
+          echo "Resolved validation backend for ${TASK_PATH}: $BACKEND (override='${ENV_OVERRIDE}', task.toml='${TASK_ENV}', default='${ENV_DEFAULT}')"
+
+      - name: Install Harbor
+        env:
+          RI_SELECTED_TASK: ${{ matrix.task }}
+          RI_ALL_TASKS_JSON: ${{ needs.detect-tasks.outputs.tasks }}
+          RI_TASK_PREFIX: pr
+          ENV_BACKEND: ${{ steps.backend.outputs.backend }}
+        run: |
+          # Each non-docker backend (modal, daytona, e2b, runloop, gke,
+          # tensorlake, islo) ships as an optional harbor extra. docker has none.
+          if [ "$ENV_BACKEND" = "docker" ]; then
+            uv tool install harbor==0.23.0
+          else
+            if [ "$ENV_BACKEND" = "modal" ] && python3 base/tools/isaac-modal/ci_harbor.py requires-native; then
+              uv tool install --python 3.12 "harbor[modal]==0.21.0" --with "modal==1.5.4"
+            else
+              uv tool install --python 3.12 "harbor[$ENV_BACKEND]"
+            fi
+          fi
+
+      - name: Install Python dependencies
+        run: uv pip install --system scikit-learn==1.6.1
+
+      - name: Similarity check
+        id: similarity
+        env:
+          TASK_PATH: ${{ matrix.task }}
+        run: |
+          echo "## Similarity Check" >> $GITHUB_STEP_SUMMARY
+          if OUTPUT=$(python3 base/ci_checks/check-similarity.py "pr/$TASK_PATH" base/tasks 2>&1); then
+            echo "✅ $OUTPUT" >> $GITHUB_STEP_SUMMARY
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ $OUTPUT" >> $GITHUB_STEP_SUMMARY
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Build Docker environment
+        id: docker-build
+        if: steps.backend.outputs.backend == 'docker'
+        env:
+          TASK_PATH: ${{ matrix.task }}
+        run: |
+          echo "## Docker Build" >> $GITHUB_STEP_SUMMARY
+          SAFE_TAG=$(echo "$TASK_PATH" | tr '/' '-')
+          if docker build -t "task-env-${SAFE_TAG}" "pr/$TASK_PATH/environment"; then
+            echo "✅ Docker build successful" >> $GITHUB_STEP_SUMMARY
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Docker build failed" >> $GITHUB_STEP_SUMMARY
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Oracle validation
+        id: oracle
+        # Run unless the local docker prebuild step ran AND failed. For non-docker
+        # envs the docker-build step is skipped (no local build needed); harbor
+        # builds the image inside modal/etc and any failure surfaces here.
+        if: steps.docker-build.outcome == 'success' || steps.docker-build.outcome == 'skipped'
+        env:
+          TASK_PATH: ${{ matrix.task }}
+          ENV_BACKEND: ${{ steps.backend.outputs.backend }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          echo "## Oracle Validation (env=$ENV_BACKEND)" >> $GITHUB_STEP_SUMMARY
+          ORACLE_FAILED=false
+
+          # Run the solution and verify it passes tests.
+          # Backend is chosen by harbor_run.validate_env in llm-config.yml
+          # (default: docker), with `/validate env=<backend>` comment override.
+          SAFE_TAG=$(echo "$TASK_PATH" | tr '/' '-')
+          if OUTPUT=$(python3 base/tools/isaac-modal/ci_harbor.py run -p "pr/$TASK_PATH" --agent oracle --env "$ENV_BACKEND" -o harbor-output --job-name "${{ github.run_id }}-oracle-${SAFE_TAG}" 2>&1); then
+            # Harbor outputs "Mean: 1.000" - extract the numeric value
+            REWARD=$(echo "$OUTPUT" | grep -oP 'Mean[:\s]+\K[0-9.]+' | tail -1 || echo "0")
+            if (( $(echo "$REWARD >= 1.0" | bc -l) )); then
+              echo "✅ Oracle (solution) passes all tests (reward: $REWARD)" >> $GITHUB_STEP_SUMMARY
+              echo "success=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Oracle (solution) failed - reward: $REWARD" >> $GITHUB_STEP_SUMMARY
+              echo "success=false" >> $GITHUB_OUTPUT
+              ORACLE_FAILED=true
+            fi
+          else
+            echo "❌ Oracle validation failed to run" >> $GITHUB_STEP_SUMMARY
+            echo "success=false" >> $GITHUB_OUTPUT
+            ORACLE_FAILED=true
+          fi
+
+          echo "<details><summary>Output</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$ORACLE_FAILED" = "true" ]; then
+            exit 1
+          fi
+
+      - name: Nop validation
+        id: nop
+        if: steps.docker-build.outcome == 'success' || steps.docker-build.outcome == 'skipped'
+        env:
+          TASK_PATH: ${{ matrix.task }}
+          ENV_BACKEND: ${{ steps.backend.outputs.backend }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          echo "## Nop Validation (env=$ENV_BACKEND)" >> $GITHUB_STEP_SUMMARY
+          NOP_FAILED=false
+
+          # Run with nop agent (does nothing) - should fail tests
+          # Harbor exits 0 and reports reward regardless of pass/fail,
+          # so a non-zero exit means harbor itself crashed (infrastructure error).
+          SAFE_TAG=$(echo "$TASK_PATH" | tr '/' '-')
+          if OUTPUT=$(python3 base/tools/isaac-modal/ci_harbor.py run -p "pr/$TASK_PATH" --agent nop --env "$ENV_BACKEND" -o harbor-output --job-name "${{ github.run_id }}-nop-${SAFE_TAG}" 2>&1); then
+            # Harbor outputs "Mean: 0.000" - extract the numeric value
+            REWARD=$(echo "$OUTPUT" | grep -oP 'Mean[:\s]+\K[0-9.]+' | tail -1 || echo "")
+            if [ -z "$REWARD" ]; then
+              echo "❌ Nop validation: could not parse reward from harbor output" >> $GITHUB_STEP_SUMMARY
+              echo "success=false" >> $GITHUB_OUTPUT
+              NOP_FAILED=true
+            elif (( $(echo "$REWARD == 0.0" | bc -l) )); then
+              echo "✅ Nop (no action) correctly fails tests (reward: $REWARD)" >> $GITHUB_STEP_SUMMARY
+              echo "success=true" >> $GITHUB_OUTPUT
+            elif (( $(echo "$REWARD < 1.0" | bc -l) )); then
+              # Rewards are binary here (see ci_checks/check-binary-reward.sh), so a nop
+              # run scoring strictly between 0 and 1 means the verifier hands out credit
+              # for doing nothing. That used to pass this gate because the condition was
+              # only `< 1.0`.
+              echo "❌ Nop (no action) scored $REWARD - reward must be exactly 0 or 1, and a nop run must score 0" >> $GITHUB_STEP_SUMMARY
+              echo "success=false" >> $GITHUB_OUTPUT
+              NOP_FAILED=true
+            else
+              echo "❌ Nop (no action) passes tests - task may be trivial or tests are broken" >> $GITHUB_STEP_SUMMARY
+              echo "success=false" >> $GITHUB_OUTPUT
+              NOP_FAILED=true
+            fi
+          else
+            echo "❌ Nop validation: harbor crashed (exit code: $?)" >> $GITHUB_STEP_SUMMARY
+            echo "success=false" >> $GITHUB_OUTPUT
+            NOP_FAILED=true
+          fi
+
+          echo "<details><summary>Output</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$NOP_FAILED" = "true" ]; then
+            exit 1
+          fi
+
+      - name: Check verifier output (reward + ctrf)
+        if: always()
+        continue-on-error: true
+        run: |
+          # Reads the files the verifier actually emitted during the oracle and nop runs
+          # above. The static checks read a task's source and can only prove what they can
+          # parse; this reads the artifacts, so it has no blind spots -- however the reward
+          # got written, the value that reached harbor is on disk here.
+          #
+          # Reporting-only for now (`continue-on-error`). Two rules are staged behind flags
+          # until the tasks that predate them are migrated: --no-reward-json (animal-reid
+          # still writes one) and --require-ctrf (6 of 37 tasks have no pytest --ctrf).
+          # Flip both on, and drop continue-on-error, once those land.
+          echo "## Verifier output" >> $GITHUB_STEP_SUMMARY
+          STATUS=0
+          for pair in "oracle:1" "nop:0"; do
+            AGENT="${pair%%:*}"; WANT="${pair##*:}"
+            DIR=$(find harbor-output -maxdepth 1 -type d -name "*-${AGENT}-*" 2>/dev/null | head -1)
+            if [ -z "$DIR" ]; then
+              echo "- \`$AGENT\`: no harbor output to check" >> $GITHUB_STEP_SUMMARY
+              continue
+            fi
+            if OUT=$(python3 ci_checks/check-verifier-output.py "$DIR" --expect-reward "$WANT" 2>&1); then
+              echo "- \`$AGENT\`: ✅ $OUT" >> $GITHUB_STEP_SUMMARY
+            else
+              STATUS=1
+              echo "- \`$AGENT\`: ❌" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "$OUT" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "$OUT"
+          done
+          exit $STATUS
+
+      - name: Save execution results
+        if: always()
+        env:
+          TASK_PATH: ${{ matrix.task }}
+          SIMILARITY: ${{ steps.similarity.outputs.success }}
+          DOCKER_BUILD: ${{ steps.docker-build.outcome == 'skipped' && 'skipped' || steps.docker-build.outputs.success }}
+          ORACLE: ${{ steps.oracle.outputs.success }}
+          NOP: ${{ steps.nop.outputs.success }}
+        run: |
+          mkdir -p "validation-results/$(dirname "$TASK_PATH")"
+
+          # How long the oracle took, from the trial's own phase timestamps rather than
+          # the step's wall clock, so image pulls and runner noise stay out of it. Three
+          # spans: `solve` is agent_execution -- the same measure /run reports per agent
+          # trial, so oracle and agent runtimes are comparable; `verify` is the test
+          # suite, which is where a task that is slow for the reviewer usually is; and
+          # `total` is start-to-finish, what an author waits through. Read here rather
+          # than later because the strip step below deletes a passing oracle's job dir.
+          TIMING=$(python3 - <<'PY'
+          import glob, json
+          from datetime import datetime
+
+
+          def parse(ts):
+              if not ts:
+                  return None
+              try:
+                  return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+              except ValueError:
+                  return None
+
+
+          def span(block):
+              a = parse((block or {}).get("started_at"))
+              b = parse((block or {}).get("finished_at"))
+              return None if not (a and b) else max(0.0, (b - a).total_seconds())
+
+
+          out = {"oracle_solve_secs": None, "oracle_verify_secs": None, "oracle_total_secs": None}
+          for f in sorted(glob.glob("harbor-output/**/result.json", recursive=True)):
+              try:
+                  d = json.load(open(f))
+              except Exception:
+                  continue
+              # The nop run writes into the SAME -o directory, so identify the trial by
+              # the agent that produced it, not by its job-name path -- a task whose own
+              # name contains "oracle" would make a path match ambiguous. The job-level
+              # result.json has neither an agent nor the phase blocks, so it drops out
+              # here too.
+              agent = ((d.get("config") or {}).get("agent") or {}).get("name") \
+                  or (d.get("agent_info") or {}).get("name")
+              if agent != "oracle" or "agent_execution" not in d:
+                  continue
+              out = {
+                  "oracle_solve_secs": span(d.get("agent_execution")),
+                  "oracle_verify_secs": span(d.get("verifier")),
+                  "oracle_total_secs": span(d),
+              }
+              break
+          print(json.dumps({k: (None if v is None else round(v, 1)) for k, v in out.items()}))
+          PY
+          ) || TIMING=""
+          # A timing read must never cost us the pass/fail record itself.
+          [ -z "$TIMING" ] && TIMING='{}'
+          echo "Oracle timing for ${TASK_PATH}: $TIMING"
+
+          jq -n \
+            --arg task "$TASK_PATH" \
+            --arg similarity "$SIMILARITY" \
+            --arg docker "$DOCKER_BUILD" \
+            --arg oracle "$ORACLE" \
+            --arg nop "$NOP" \
+            --argjson timing "$TIMING" \
+            '{task: $task, similarity: $similarity, docker_build: $docker, oracle: $oracle, nop: $nop} + $timing' \
+            > "validation-results/${TASK_PATH}.json"
+
+      - name: Upload execution results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-${{ strategy.job-index }}
+          path: validation-results/
+
+      - name: Strip answers from the oracle job before upload
+        if: always()
+        # A passing oracle is removed outright; a failing one keeps its verifier
+        # output and loses the copied-out `/results`. The nop job is untouched --
+        # it submits nothing, so there is no answer in it.
+        run: |
+          # This job checks the base repo out to base/ and the PR to pr/, so the
+          # script is NOT at the workspace root. Non-fatal, but warn loudly: a
+          # silent `|| true` hid this step failing on every run since it landed.
+          PRUNE=base/.github/scripts/prune_oracle_jobs.py
+          if [ ! -f "$PRUNE" ]; then
+            echo "::warning::$PRUNE not found; oracle answers NOT stripped from the upload"
+          elif ! python3 "$PRUNE" harbor-output; then
+            echo "::warning::prune_oracle_jobs.py failed; oracle answers NOT stripped"
+          fi
+
+      - name: Upload harbor jobs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbor-output-${{ strategy.job-index }}
+          path: harbor-output/
+          if-no-files-found: ignore
+          retention-days: 5
+
+  gpu-execution-checks:
+    # GPU pool tasks: install on the host, Oracle and Nop on two different GPUs of the pool,
+    # accept.py. Code from main; task from the pinned PR commit.
+    needs: [check-trigger, detect-tasks, post-placeholder]
+    if: needs.detect-tasks.outputs.has_gpu_tasks == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        task: ${{ fromJson(needs.detect-tasks.outputs.gpu_tasks) }}
+    permissions:
+      contents: write  # the lanes download the operator's draft-release CPU image
+      checks: read     # the verify stage reads the static-checks result of the commit
+    uses: ./.github/workflows/gpu-task-controls.yml
+    with:
+      pr_number: ${{ needs.check-trigger.outputs.pr_number }}
+      head_sha: ${{ needs.detect-tasks.outputs.head_sha }}
+      task_path: ${{ matrix.task }}
+      tier: ${{ needs.detect-tasks.outputs.tier }}
+    secrets: inherit
+
+  post-comment:
+    needs: [check-trigger, detect-tasks, execution-checks, gpu-execution-checks]
+    if: >-
+      always()
+      && (needs.detect-tasks.outputs.has_tasks == 'true' || needs.detect-tasks.outputs.has_gpu_tasks == 'true' || needs.detect-tasks.outputs.has_retired_tasks == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # private repo: read PR files / workflow files / Discussions
+      pull-requests: write
+      checks: write
+    steps:
+      # Shared renderer + check-run scripts, from main.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Download execution results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: execution-*
+          merge-multiple: true
+          path: execution-results/
+
+      - name: Render comment
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.check-trigger.outputs.pr_number }}
+          TASKS_JSON: ${{ needs.detect-tasks.outputs.all_tasks }}
+          RETIRED_JSON: ${{ needs.detect-tasks.outputs.retired_tasks }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Shared with the automatic push run (validate-task-report.yml) so the
+          # two paths render the identical table, legend and check-run verdicts.
+          HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq '.headRefOid')
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_ENV"
+          python3 .github/scripts/render_validation_comment.py \
+            --results-dir execution-results \
+            --tasks "$TASKS_JSON" \
+            --retired "${RETIRED_JSON:-[]}" \
+            --run-url "$RUN_URL" \
+            --repo "$REPO" \
+            --head-sha "$HEAD_SHA" \
+            --footer "Requested by a maintainer." \
+            --out comment.md \
+            --conclusions-out conclusions.json
+          # GPU pool tasks add their per-control results below the table.
+          find execution-results -name '*.gpu.md' -print0 | sort -z | xargs -0 -r cat >> comment.md
+          cat comment.md
+
+      - name: Post or update comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: task-validation
+          path: comment.md
+          number: ${{ needs.check-trigger.outputs.pr_number }}
+
+      # Comment-triggered runs attach their implicit job check-runs to the
+      # default-branch SHA, not the PR head -- so a passing re-validation never
+      # clears the required `execution-checks (<task>)` gate left red by an
+      # earlier run. Post an explicit check-run of the same name on the PR head
+      # SHA so the newest result wins.
+      - name: Sync execution-checks status to PR head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/post_execution_checks.sh "$REPO" "$head_sha" "$RUN_URL" conclusions.json

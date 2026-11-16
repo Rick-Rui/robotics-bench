@@ -1,0 +1,67 @@
+{
+  "schema": "ziwu.pr8-transport-acceptance.v1",
+  "date": "2026-11-09",
+  "source_pr18_sha": "b00e7a515b8b83608cbf3278e7f642e25cd19f45",
+  "pr8_implementation_sha": "aa607b3c",
+  "model_calls": 0,
+  "benchmark_trials": 0,
+  "workload": "isaac-drop-v1",
+  "rows": [
+    {
+      "case": "gpu1-positive",
+      "gpu": 1,
+      "state": "succeeded",
+      "job_id": "6a9c2fe34214488495a2633331a38dcb",
+      "request_sha256": "547007115819cfb568466f558815cbc957d4d53b01d5c7835e9086aadfd2bc6d",
+      "score": 1.0,
+      "success": true,
+      "exit_code": 0,
+      "gpu_seconds": 45.94108253400191,
+      "queue_seconds": 0.01877593994140625,
+      "native_pid": 33557,
+      "implementation_version": "43ac24166512c993"
+    },
+    {
+      "case": "gpu1-negative",
+      "gpu": 1,
+      "state": "succeeded",
+      "job_id": "4f6c5a095b764f6db2a3da01a27d8c5f",
+      "request_sha256": "a9991d29674ccc2dee0b95996f474f4b2ddce760f65b6b06ced8cc91f026e682",
+      "score": 0.0,
+      "success": false,
+      "exit_code": 0,
+      "gpu_seconds": 24.02532196600805,
+      "queue_seconds": 45.439765214920044,
+      "native_pid": 39229,
+      "implementation_version": "43ac24166512c993"
+    },
+    {
+      "case": "gpu2-positive",
+      "gpu": 2,
+      "state": "succeeded",
+      "job_id": "05a2447d0a8043e1be23f94ddb48f0d7",
+      "request_sha256": "73b5c45d7847f59282e191b0c54af6733b475b008f74c357cc5902c667f64165",
+      "score": 1.0,
+      "success": true,
+      "exit_code": 0,
+      "gpu_seconds": 46.54537089198129,
+      "queue_seconds": 0.015175342559814453,
+      "native_pid": 33778,
+      "implementation_version": "43ac24166512c993"
+    },
+    {
+      "case": "gpu2-negative",
+      "gpu": 2,
+      "state": "succeeded",
+      "job_id": "56a2ea64060d44899202e461e3365909",
+      "request_sha256": "1945967690cd18f5ce12638f046ea439a24b2304c65cbb2c1147a8566ebd18ab",
+      "score": 0.0,
+      "success": false,
+      "exit_code": 0,
+      "gpu_seconds": 22.420202542009065,
+      "queue_seconds": 45.26652979850769,
+      "native_pid": 39952,
+      "implementation_version": "43ac24166512c993"
+    }
+  ]
+}

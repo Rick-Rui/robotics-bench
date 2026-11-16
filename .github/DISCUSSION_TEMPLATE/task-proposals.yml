@@ -1,0 +1,80 @@
+title: "[Proposal] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form takes about ten minutes. Reviewers assess direction and resources, not implementation details. The rules are in GUIDANCE.md, CONTRIBUTING.md and docs/CASE.md.
+  - type: textarea
+    id: author
+    attributes:
+      label: Author
+      description: Keep the heading line and the label at the start of each line. The automated review uses the heading to separate author information from the task, and the approval notice uses the GitHub line to find you.
+      value: |
+        ## Author Information
+        Author:
+        GitHub: @
+        Organization:
+        Relevant Experience:
+        Conflicts of Interest:
+    validations:
+      required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: Task type
+      description: See docs/TASK_TYPES.md.
+      options:
+        - "Online control: the agent drives a simulated robot through the case's numeric API"
+        - "Offline submission: the agent submits a controller, plan or parameters that the verifier runs in simulation"
+    validations:
+      required: true
+  - type: textarea
+    id: task
+    attributes:
+      label: Task
+      description: What the agent does and what counts as success, in three to five sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: world
+    attributes:
+      label: Robot, engine and interface
+      description: The robot (any embodiment), the CPU engine of the CPU tier (and the GPU engine, if you plan a GPU tier), and what the agent observes and commands.
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: Success check
+      description: The condition the verifier will evaluate on the replayed end state, with every threshold (docs/CASE.md section 3), and why a lazy or adversarial policy (finish at once, knock the target over, sweep everything) cannot meet it.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Reference solution
+      description: How the solution reaches the goal closed loop through the agent's API, from what the agent can observe, and whether it already exists. The layouts you plan (how many, development and evaluation).
+    validations:
+      required: true
+  - type: checkboxes
+    id: tiers
+    attributes:
+      label: Planned tiers
+      description: Each tier is its own PR. The CPU tier comes first; the GPU pool is granted to you once your CPU tier is merged.
+      options:
+        - label: CPU (Docker)
+        - label: GPU (GPU pool, Isaac Sim 5.1)
+  - type: textarea
+    id: assets
+    attributes:
+      label: Assets and data
+      description: The level of each object (A parameterised shapes, B own meshes, C upstream asset library; see docs/ASSETS.md), where it comes from and its licence. Give the id of sources already registered in docs/asset-sources.yml.
+    validations:
+      required: true
+  - type: textarea
+    id: difficulty
+    attributes:
+      label: Expected difficulty and resources
+      description: Where you expect models to fail, and why. The expected duration of one trial; if it exceeds two hours, say where the time goes.
+    validations:
+      required: true

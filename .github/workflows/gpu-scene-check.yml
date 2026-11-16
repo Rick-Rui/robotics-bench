@@ -1,0 +1,398 @@
+name: GPU Scene Check
+run-name: GPU scene check / PR ${{ github.event.issue.number }} / comment ${{ github.event.comment.id }}
+
+# /scene on a tier:gpu PR (docs/COMMANDS.md, docs/SCENE_CHECK.md): do the task's scene and assets hold up
+# on the GPU pool? For a task whose assets and bundle exist but whose reference solution is not ready yet.
+#
+#   /scene [gpu=N]       verify -> deploy -> ONE control session on one GPU (default: any free GPU;
+#                        gpu=N names a lane of GPU_POOL_LANES, maintainers only)
+#
+# The session is the task's scene probe (solution/scene_probe.sh: observe, hold still, save camera frames) when
+# the task ships one, otherwise a no-action Nop. The verify and deploy stages are the ones /validate runs
+# (gpu-task-controls.yml, job `deploy`; keep the two in step). What differs: one control on one GPU instead of
+# Oracle and Nop on two, no accept.py, no execution-checks result and no gpu-acceptance artifact. A scene check
+# therefore never enables /run, /cheat or /test: run.py still refuses model trials without the acceptance record
+# of this task digest on main, and only /validate produces that record.
+#
+# Orchestration code comes from main; the task comes from the PR commit pinned when the comment was made.
+#
+# Who may run it. Maintainers (write access), like /validate. The PR's AUTHOR too, at most 3 times per PR per
+# 24 hours, on any free GPU, when either
+#   - the task's CPU tier is merged into main from a PR by the same author (tools/isaac-remote/gpu_grant.py):
+#     the GPU is handed to the author once the CPU tier passed review (docs/LADDER.md). The host has no
+#     sandbox, so the author's serve, collect and verify code runs there as it is; or
+#   - the repository variable ZIWU_AUTHOR_SCENE_CHECK is 'true' (default: unset, off) and
+#     tools/isaac-remote/scene_trust.py finds the task data-only on the pinned commit.
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: gpu-scene-${{ github.event.issue.number }}-${{ github.event.comment.id }}
+
+permissions:
+  contents: read
+
+env:
+  GPU_RELAY: ${{ vars.GPU_RELAY }}   # user@host of the GPU pool relay
+  GPU_POOL_LANES: ${{ vars.GPU_POOL_LANES }}   # GPUs of the pool this repository uses; empty = 0,1,2,3
+
+jobs:
+  route:
+    if: github.event.issue.pull_request
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      run: ${{ steps.route.outputs.run }}
+      task_path: ${{ steps.route.outputs.task_path }}
+      head_sha: ${{ steps.route.outputs.head_sha }}
+      gpu: ${{ steps.route.outputs.gpu }}
+      slug: ${{ steps.route.outputs.slug }}
+      author: ${{ steps.route.outputs.author }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            ci_checks/check-task-tier.py
+            tools/isaac-remote/gpu_grant.py
+            tools/isaac-remote/scene_check.py
+            tools/isaac-remote/scene_trust.py
+            tools/isaac-remote/trial_command.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: route
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          COMMENT_USER_TYPE: ${{ github.event.comment.user.type }}
+          PR_AUTHOR: ${{ github.event.issue.user.login }}
+          AUTHOR_SCENE: ${{ vars.ZIWU_AUTHOR_SCENE_CHECK }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          PARSED=$(python3 tools/isaac-remote/scene_check.py parse) || { echo "Not a /scene command"; exit 0; }
+          [ "$COMMENT_USER_TYPE" != "Bot" ] || { echo "Ignoring a bot"; exit 0; }
+          TIER=$(python3 ci_checks/check-task-tier.py "$PR_NUMBER" --repo "$REPO" --json)
+          # tier-commands.yml answers a /scene on a PR of another tier.
+          if [ "$(jq -r .tier <<< "$TIER")" != "gpu" ]; then echo "Not a tier:gpu PR"; exit 0; fi
+          ROLE=$(gh api "repos/${REPO}/collaborators/${COMMENT_USER}/permission" --jq '.role_name' 2>/dev/null || echo none)
+          AUTHOR=""
+          if [[ ! "$ROLE" =~ ^(admin|maintain|write)$ ]]; then
+            # The PR author; whether the GPU is theirs (CPU tier merged, or a data-only task) comes below.
+            if [ "$COMMENT_USER" != "$PR_AUTHOR" ]; then
+              gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} \`/scene\` is for maintainers and the author of this PR only: it installs this version on a GPU host and occupies the GPU pool." || true
+              exit 0
+            fi
+            AUTHOR="$COMMENT_USER"
+          fi
+          ERROR=$(jq -r '.error // ""' <<< "$PARSED")
+          if [ -n "$ERROR" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} ${ERROR}" || true
+            exit 0
+          fi
+          if [ "$(jq '.tasks | length' <<< "$TIER")" != "1" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} A PR may change one task only; this PR changes $(jq '.tasks | length' <<< "$TIER")." || true
+            exit 0
+          fi
+          TASK_PATH=$(jq -r .task <<< "$TIER")
+          [[ "$TASK_PATH" =~ ^(tasks|lite)/[A-Za-z0-9_./-]+$ && "$TASK_PATH" != *..* ]] || { echo "Invalid task path"; exit 1; }
+          HEAD_SHA=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')
+          GPU=$(jq -r .gpu <<< "$PARSED")
+          if [ -n "$AUTHOR" ]; then
+            # Author-triggered: one lane, a daily quota, and either the CPU tier merged (gpu_grant.py) or a
+            # data-only task. Decided from GitHub API data only; nothing from the PR is checked out or run.
+            if [ "$GPU" != "auto" ]; then
+              gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} An author-triggered \`/scene\` runs on any free GPU of the pool; drop \`gpu=\`." || true
+              exit 0
+            fi
+            GRANT=$(python3 tools/isaac-remote/gpu_grant.py check --repo "$REPO" --task-path "$TASK_PATH" --author "$AUTHOR" --base "$DEFAULT_BRANCH") \
+              || GRANT='{"granted": false, "reason": "Could not look up the CPU tier of this task."}'
+            if [ "$(jq -r .granted <<< "$GRANT")" != "true" ] && [ "$AUTHOR_SCENE" != "true" ]; then
+              gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} \`/scene\` was not run: $(jq -r .reason <<< "$GRANT")" || true
+              exit 0
+            fi
+            if [ "$(jq -r .granted <<< "$GRANT")" = "true" ]; then
+              echo "GPU granted: $(jq -r .reason <<< "$GRANT")"
+            elif ! TRUST=$(python3 tools/isaac-remote/scene_trust.py check --repo "$REPO" --sha "$HEAD_SHA" --task-path "$TASK_PATH" --base "$DEFAULT_BRANCH"); then
+              gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} Could not determine whether this task holds data only, so \`/scene\` was not run. A maintainer can trigger it." || true
+              exit 0
+            fi
+            if [ "$(jq -r .granted <<< "$GRANT")" != "true" ] && [ "$(jq -r .data_only <<< "$TRUST")" != "true" ]; then
+              {
+                echo "@${COMMENT_USER} Files written by the author of this task run on the GPU host or take part in the build, so the author cannot trigger \`/scene\`; it was not run. A maintainer can trigger it after reviewing these files:"
+                echo
+                jq -r '.problems[:12][] | "- `" + . + "`"' <<< "$TRUST"
+                echo
+                echo "When the author's files are data only and everything else is synced from the platform, the author can trigger it (see \`docs/SCENE_CHECK.md\`)."
+                echo "$(jq -r .reason <<< "$GRANT")"
+              } > refusal.md
+              gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file refusal.md || true
+              exit 0
+            fi
+            QUOTA=$(python3 tools/isaac-remote/scene_trust.py quota --repo "$REPO" --pr "$PR_NUMBER" --author "$AUTHOR") || QUOTA='{"allowed": false, "used": "?", "limit": "?"}'
+            if [ "$(jq -r .allowed <<< "$QUOTA")" != "true" ]; then
+              gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} An author may trigger \`/scene\` at most $(jq -r .limit <<< "$QUOTA") times per PR in 24 hours; $(jq -r .used <<< "$QUOTA") already used, so this one was not run." || true
+              exit 0
+            fi
+          fi
+          gh api "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" -f content='eyes' >/dev/null || true
+          {
+            echo "run=true"
+            echo "task_path=$TASK_PATH"
+            echo "slug=$(basename "$TASK_PATH")"
+            echo "head_sha=$HEAD_SHA"
+            echo "gpu=$GPU"
+            echo "author=$AUTHOR"
+          } >> "$GITHUB_OUTPUT"
+
+  # The verify and deploy stages of /validate (gpu-task-controls.yml, job `deploy`).
+  deploy:
+    needs: route
+    if: needs.route.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      deployed: ${{ steps.deploy.outputs.deployed }}
+    env:
+      TASK_PATH: ${{ needs.route.outputs.task_path }}
+      HEAD_SHA: ${{ needs.route.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {path: base, persist-credentials: false}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.route.outputs.head_sha }}
+          path: pr
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m pip install scikit-learn==1.6.1
+      - name: Similarity check
+        id: similarity
+        run: |
+          if OUTPUT=$(python3 base/ci_checks/check-similarity.py "pr/$TASK_PATH" base/tasks 2>&1); then
+            echo "success=true" >> "$GITHUB_OUTPUT"; echo "✅ $OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "success=false" >> "$GITHUB_OUTPUT"; echo "❌ $OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Static checks passed on this commit
+        id: static
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          RUN_CONCLUSION=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?check_name=static-checks&per_page=100" \
+            --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // "missing"' || echo missing)
+          # The only difference from /validate: a run whose one failed row is the proposal-link check counts as
+          # passed for a scene check (scene_check.py static). The rows come from the static-checks sticky
+          # comment that static-checks.yml writes; nothing from the PR is run.
+          STICKY=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --jq '.[] | select(.body | contains("<!-- Sticky Pull Request Commentstatic-checks -->")) | {user: .user.login, body}' \
+            | head -c 200000 | python3 -c 'import json,sys; rows=[json.loads(l) for l in sys.stdin if l.strip()]; print(json.dumps(rows[-1] if rows else None))' || echo null)
+          CONCLUSION=$(CONCLUSION="$RUN_CONCLUSION" HEAD_SHA="$HEAD_SHA" STICKY="$STICKY" python3 base/tools/isaac-remote/scene_check.py static)
+          echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
+          case "$CONCLUSION" in
+            success) echo "✅ static checks: success" >> "$GITHUB_STEP_SUMMARY" ;;
+            proposal_only) echo "✅ static checks: only the proposal-link check failed (does not block /scene)" >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo "❌ static checks: $CONCLUSION (fix them, or comment /check, before /scene)" >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+      - name: GPU tier preflight (no GPU host)
+        id: preflight
+        run: |
+          # No pipe here: the step's result is preflight.py's exit status.
+          if python base/tools/isaac-remote/preflight.py --task-repo pr --sha "$HEAD_SHA" --task-path "$TASK_PATH" \
+               --tier gpu --output work/preflight.json > preflight.txt 2>&1; then
+            echo "success=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "success=false" >> "$GITHUB_OUTPUT"
+          fi
+          cat preflight.txt
+          cat preflight.txt >> "$GITHUB_STEP_SUMMARY"
+      # Stage gate: only a revision that passed every check above is installed on the pool.
+      - name: Verify stage result
+        id: verify
+        env:
+          STATIC: ${{ steps.static.outputs.conclusion }}
+          SIMILARITY: ${{ steps.similarity.outputs.success }}
+          PREFLIGHT: ${{ steps.preflight.outputs.success }}
+        run: |
+          mkdir -p work
+          PREFLIGHT_FAILED="$(grep '^❌' preflight.txt | tr '\n' ' ' || true)" python3 -c "import json,os; e=os.environ; json.dump({'static':e['STATIC'],'similarity':e['SIMILARITY'],'preflight':e['PREFLIGHT'],'preflight_failed':e['PREFLIGHT_FAILED']}, open('work/verify.json','w'))"
+          if { [ "$STATIC" = success ] || [ "$STATIC" = proposal_only ]; } && [ "$SIMILARITY" = true ] && [ "$PREFLIGHT" = true ]; then
+            echo "verified=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+            echo "Verify stage failed, so the revision was not deployed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Open restricted GPU tunnel
+        if: steps.verify.outputs.verified == 'true'
+        env:
+          TUNNEL_KEY: ${{ secrets.PR8_GPU_TUNNEL_KEY }}
+          TUNNEL_HOST_KEY: ${{ secrets.PR8_GPU_FAST_TUNNEL_HOST_KEY }}
+          TRANSPORT_TOKEN: ${{ secrets.PR8_GPU_TRANSPORT_TOKEN }}
+        run: bash base/tools/isaac-remote/tunnel.sh open
+      - name: Install the task revision on the GPU host
+        id: deploy
+        if: steps.verify.outputs.verified == 'true'
+        run: |
+          if python base/tools/isaac-remote/deploy_task.py --task-repo pr --sha "$HEAD_SHA" \
+               --task-path "$TASK_PATH" --token-file "$RUNNER_TEMP/ziwu-transport/token" \
+               --output work/deploy.json; then
+            echo "deployed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Close transport
+        if: always()
+        run: bash base/tools/isaac-remote/tunnel.sh close
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-scene-deploy-${{ needs.route.outputs.slug }}
+          path: |
+            work/verify.json
+            work/deploy.json
+            work/preflight.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # One control session through the full online path, as the controls of /validate run: the task's scene
+  # probe when it has one (solution/scene_probe.sh), otherwise a no-action Nop.
+  session:
+    needs: [route, deploy]
+    if: needs.deploy.outputs.deployed == 'true'
+    # One scene check per PR at a time; a repeat /scene queues behind it.
+    concurrency:
+      group: gpu-scene-session-pr-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    # The operator's CPU agent image is a draft release asset, which needs write scope to download.
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      TASK_PATH: ${{ needs.route.outputs.task_path }}
+      HEAD_SHA: ${{ needs.route.outputs.head_sha }}
+      GPU: ${{ needs.route.outputs.gpu }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {path: base, persist-credentials: false}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.route.outputs.head_sha }}
+          path: pr
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Install pinned host harness
+        run: python -m pip install 'harbor==0.23.0'
+      - name: Verify CPU image
+        working-directory: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p cpu-image-input
+          gh release download pr8-cpu-image-20261109 --repo "$GITHUB_REPOSITORY" --pattern cpu-image.tar.gz --dir cpu-image-input
+          python tools/isaac-model-comparison/cpu_image.py --archive cpu-image-input/cpu-image.tar.gz \
+            --sha256 9805cca464f3b273e5832b5989ad0ed2116567b6b3b3acb7788ab316d294d0fa \
+            --image-id sha256:efd2f349d4fbaf9ed64ee0339913b8cc51a6b94db237db5a9a50fe602d0b9b10 \
+            --output work/cpu-image.json
+          rm -rf cpu-image-input
+      - name: Open restricted GPU tunnel
+        env:
+          TUNNEL_KEY: ${{ secrets.PR8_GPU_TUNNEL_KEY }}
+          TUNNEL_HOST_KEY: ${{ secrets.PR8_GPU_FAST_TUNNEL_HOST_KEY }}
+          TRANSPORT_TOKEN: ${{ secrets.PR8_GPU_TRANSPORT_TOKEN }}
+        run: bash base/tools/isaac-remote/tunnel.sh open
+      - name: Scene probe, or Nop when the task has none
+        continue-on-error: true
+        run: |
+          # File presence in the pinned commit decides; nothing from the PR runs on this runner outside the
+          # agent container.
+          if git -C pr cat-file -e "$HEAD_SHA:$TASK_PATH/solution/scene_probe.sh" 2>/dev/null; then HARNESS=scene-probe; else HARNESS=nop; fi
+          echo "Control: $HARNESS" >> "$GITHUB_STEP_SUMMARY"
+          python base/tools/isaac-remote/run.py --harness "$HARNESS" --gpu "$GPU" --task-path "$TASK_PATH" --tier gpu \
+            --task-repo pr --source-sha "$HEAD_SHA" --request-id "scene-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GPU-$HARNESS" \
+            --token-file "$RUNNER_TEMP/ziwu-transport/token" --output "comparison-output/$HARNESS-gpu$GPU-1"
+      - name: Confirm remote cleanup
+        if: always()
+        run: |
+          if test -S "$RUNNER_TEMP/ziwu-transport/socket"; then
+            python base/tools/isaac-remote/cleanup.py --output comparison-output --token-file "$RUNNER_TEMP/ziwu-transport/token"
+          fi
+      - name: Close transport
+        if: always()
+        run: bash base/tools/isaac-remote/tunnel.sh close
+      - name: Show measured results
+        if: always()
+        run: python base/tools/isaac-remote/report.py --output comparison-output >> "$GITHUB_STEP_SUMMARY"
+      - name: Camera frames of the probe
+        if: always()
+        run: |
+          mkdir -p scene-frames
+          find comparison-output -type d -path '*/artifacts/app/output/scene' 2>/dev/null | while read -r d; do cp -r "$d"/. scene-frames/; done
+          find scene-frames -type f ! \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -delete
+          find scene-frames -type l -delete
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-scene-frames-${{ needs.route.outputs.slug }}
+          path: scene-frames/
+          if-no-files-found: ignore
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-scene-session-${{ needs.route.outputs.slug }}
+          path: |
+            base/work/
+            comparison-output/
+          retention-days: 30
+
+  comment:
+    needs: [route, deploy, session]
+    if: always() && needs.route.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          sparse-checkout: |
+            tools/isaac-remote/scene_check.py
+            tools/isaac-remote/trial_command.py
+            tools/isaac-remote/verify_receipt.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gpu-scene-*
+          path: downloaded
+      - name: Post the result
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          TASK_PATH: ${{ needs.route.outputs.task_path }}
+          HEAD_SHA: ${{ needs.route.outputs.head_sha }}
+          GPU: ${{ needs.route.outputs.gpu }}
+          AUTHOR: ${{ needs.route.outputs.author }}
+        run: |
+          mkdir -p downloaded
+          python3 tools/isaac-remote/scene_check.py comment --root downloaded --task-path "$TASK_PATH" --sha "$HEAD_SHA" \
+            --gpu "$GPU" --author "$AUTHOR" --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file comment.md

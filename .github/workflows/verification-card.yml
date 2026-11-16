@@ -1,0 +1,88 @@
+name: Verification Card
+
+# One sticky comment per task PR that says what actually ran on the PR's current
+# head commit: static checks, execution checks (Oracle / Nop), the GPU acceptance
+# record on main (tier:gpu), the merge gate, the proposal link and the PR body
+# length. A check with no run on that commit is shown as "not run",
+# never as passed. Rendering and posting are in tools/verification-card/card.py.
+#
+# Every trigger runs card.py from the default branch, never PR code: workflow_run
+# and workflow_dispatch use the default branch's workflow file, the checkout below
+# pins the default branch, and the script only calls the GitHub API (nothing from
+# the PR is checked out or executed).
+#
+# When it runs:
+#   - after Static Checks, Validate Task or Validate Task (auto) complete: the card
+#     of the open PR whose head commit is that run's head_sha. A run that was
+#     dispatched (`/check`, `/validate`) carries main's sha and matches no PR; those
+#     are picked up by the next line.
+#   - after the Required Approvals Gate completes: for a pull_request_target run the
+#     card of that PR; for its other runs (a review was submitted, reviewers were
+#     reassigned, PR Status finished) the gate re-evaluates every open PR, so the
+#     cards of all open task PRs are refreshed. The gate's half-hourly schedule
+#     sweep is skipped here.
+#   - workflow_dispatch with a PR number.
+# A card whose content did not change is left alone (no edit, no notification).
+
+on:
+  workflow_run:
+    workflows: ["Static Checks", "Validate Task", "Validate Task (auto)", "Required Approvals Gate"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to refresh the verification card for"
+        required: true
+
+permissions: {}
+
+# One run per subject at a time; the newer run reads fresher state, so cancelling
+# the older one is safe. Sweeps share one group so a per-commit run cannot cancel them.
+concurrency:
+  group: >-
+    verification-card-${{ inputs.pr_number
+      || (github.event.workflow_run.name == 'Required Approvals Gate'
+          && github.event.workflow_run.event != 'pull_request_target' && 'sweep')
+      || github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  card:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      !(github.event.workflow_run.name == 'Required Approvals Gate' && github.event.workflow_run.event == 'schedule')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read        # the acceptance record on main, the task tree of the head commit
+      pull-requests: write  # read the PR and its files; create or edit the card comment
+      checks: read
+      statuses: read
+      discussions: read     # is the linked proposal approved (private repo)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: |
+            tools/verification-card/card.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Post or update the card
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_INPUT: ${{ inputs.pr_number }}
+          SOURCE: ${{ github.event.workflow_run.name }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          CARD=tools/verification-card/card.py
+          if [ -n "$PR_INPUT" ]; then
+            [[ "$PR_INPUT" =~ ^[0-9]+$ ]] || { echo "::error::pr_number must be a number"; exit 1; }
+            python3 "$CARD" --pr "$PR_INPUT" --post
+          elif [ "$SOURCE" = "Required Approvals Gate" ] && [ "$SOURCE_EVENT" != "pull_request_target" ]; then
+            python3 "$CARD" --all-open --post
+          else
+            python3 "$CARD" --head-sha "$HEAD_SHA" --post
+          fi

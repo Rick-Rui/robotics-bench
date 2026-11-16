@@ -1,0 +1,40 @@
+{
+  "harbor_version": "0.23.0",
+  "cpu_image": "python@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535",
+  "gpu_on_cpu_host": false,
+  "trials": [
+    {
+      "name": "positive",
+      "job_id": "6c375c878d8649cda27df1c57d9fbcd3",
+      "reward": {
+        "score": 1.0,
+        "success": 1.0
+      },
+      "remote_hostname": "n1",
+      "remote_pid": 19345,
+      "duration_sec": 30.583,
+      "exit_code": 0,
+      "final_z": 0.09999999403953552,
+      "harbor_exception": null
+    },
+    {
+      "name": "negative",
+      "job_id": "243cea5a27f943b390afc0ad3b0b2c97",
+      "reward": {
+        "score": 0.0,
+        "success": 0.0
+      },
+      "remote_hostname": "n1",
+      "remote_pid": 22087,
+      "duration_sec": 27.75,
+      "exit_code": 0,
+      "final_z": 1.0,
+      "harbor_exception": null
+    }
+  ],
+  "scope": "CPU Harbor to native Isaac transport acceptance only; not EmbodiedSWE parity",
+  "native_workload_sha256": "4e2a4111b2c61a810d3b61de12c30a0a2d31719f6e370ff0beb651959356ae1c",
+  "cpu_agent_and_verifier_gpus": 0,
+  "native_gpu": 0,
+  "offline_tests_passed": 15
+}

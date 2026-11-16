@@ -1,0 +1,210 @@
+name: GPU Tier Trials
+run-name: GPU trials / PR ${{ github.event.issue.number }} / comment ${{ github.event.comment.id }}
+
+# /oracle, /run, /cheat and /test on a tier:gpu PR (docs/COMMANDS.md). The same commands on a
+# tier:cpu PR are handled by run-oracle.yml, run-trials.yml, run-cheat-trials.yml and
+# test-trials.yml (docker); those skip tier:gpu PRs, this workflow skips everything else.
+#
+#   /oracle                         the reference solution, on any free GPU
+#   /run   [agents=..] [trials=N]   model trials (default: codex and claude-code, 1 trial each)
+#   /cheat [agents=..] [trials=N]   the same with the adversarial prompt in front of the instruction
+#   /test                           one claude-code trial
+#
+# agents: codex, claude-code (Kimi k3.1 pro, the route of the GPU pool). trials: 1-5.
+# Every trial asks the host for any free GPU of the pool (GPU_POOL_LANES); the trials of one harness run
+# one after the other, different harnesses in parallel.
+#
+# Nothing is deployed here. The trial runs the revision /validate installed on the pool; model
+# trials also need the acceptance record of exactly this task digest on main
+# (tools/isaac-remote/evidence/<task>.json), otherwise run.py refuses and the comment says so.
+# Orchestration code comes from main; the task comes from the PR commit as data. Maintainers only:
+# every trial uses the pool's GPUs, and model trials the Kimi key.
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: gpu-trials-${{ github.event.issue.number }}-${{ github.event.comment.id }}
+
+permissions:
+  contents: read
+
+env:
+  GPU_RELAY: ${{ vars.GPU_RELAY }}   # user@host of the GPU pool relay
+  GPU_POOL_LANES: ${{ vars.GPU_POOL_LANES }}   # GPUs of the pool this repository uses; empty = 0,1,2,3
+
+jobs:
+  route:
+    if: github.event.issue.pull_request
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      run: ${{ steps.route.outputs.run }}
+      command: ${{ steps.route.outputs.command }}
+      task_path: ${{ steps.route.outputs.task_path }}
+      head_sha: ${{ steps.route.outputs.head_sha }}
+      lanes: ${{ steps.route.outputs.lanes }}
+      trials: ${{ steps.route.outputs.trials }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            ci_checks/check-task-tier.py
+            tools/isaac-remote/trial_command.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: route
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          COMMENT_USER_TYPE: ${{ github.event.comment.user.type }}
+        run: |
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          PARSED=$(python3 tools/isaac-remote/trial_command.py) || { echo "Not a GPU trial command"; exit 0; }
+          [ "$COMMENT_USER_TYPE" != "Bot" ] || { echo "Ignoring a bot"; exit 0; }
+          TIER=$(python3 ci_checks/check-task-tier.py "$PR_NUMBER" --repo "$REPO" --json)
+          if [ "$(jq -r .tier <<< "$TIER")" != "gpu" ]; then echo "Not a tier:gpu PR"; exit 0; fi
+          COMMAND=$(jq -r .command <<< "$PARSED")
+          ROLE=$(gh api "repos/${REPO}/collaborators/${COMMENT_USER}/permission" --jq '.role_name' 2>/dev/null || echo none)
+          if [[ ! "$ROLE" =~ ^(admin|maintain|write)$ ]]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} On the GPU tier \`/${COMMAND}\` is for maintainers only: it occupies the GPU pool, and agent trials also use model quota." || true
+            exit 0
+          fi
+          ERROR=$(jq -r '.error // ""' <<< "$PARSED")
+          if [ -n "$ERROR" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} \`/${COMMAND}\`：${ERROR}" || true
+            exit 0
+          fi
+          if [ "$(jq '.tasks | length' <<< "$TIER")" != "1" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@${COMMENT_USER} A PR may change one task only; this PR changes $(jq '.tasks | length' <<< "$TIER")." || true
+            exit 0
+          fi
+          gh api "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" -f content='eyes' >/dev/null || true
+          {
+            echo "run=true"
+            echo "command=$COMMAND"
+            echo "task_path=$(jq -r .task <<< "$TIER")"
+            echo "head_sha=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+            echo "lanes=$(jq -c .lanes <<< "$PARSED")"
+            echo "trials=$(jq -r .trials <<< "$PARSED")"
+          } >> "$GITHUB_OUTPUT"
+
+  lanes:
+    needs: route
+    if: needs.route.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJSON(needs.route.outputs.lanes) }}
+    # The operator's CPU agent image is a draft release asset, which needs write scope to download.
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {path: base, persist-credentials: false}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.route.outputs.head_sha }}
+          path: pr
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Install pinned host harness
+        run: python -m pip install 'harbor==0.23.0'
+      - name: Verify CPU image
+        working-directory: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p cpu-image-input
+          gh release download pr8-cpu-image-20261109 --repo "$GITHUB_REPOSITORY" --pattern cpu-image.tar.gz --dir cpu-image-input
+          python tools/isaac-model-comparison/cpu_image.py --archive cpu-image-input/cpu-image.tar.gz \
+            --sha256 9805cca464f3b273e5832b5989ad0ed2116567b6b3b3acb7788ab316d294d0fa \
+            --image-id sha256:efd2f349d4fbaf9ed64ee0339913b8cc51a6b94db237db5a9a50fe602d0b9b10 \
+            --output work/cpu-image.json
+          rm -rf cpu-image-input
+      - name: Open restricted GPU tunnel
+        env:
+          TUNNEL_KEY: ${{ secrets.PR8_GPU_TUNNEL_KEY }}
+          TUNNEL_HOST_KEY: ${{ secrets.PR8_GPU_FAST_TUNNEL_HOST_KEY }}
+          TRANSPORT_TOKEN: ${{ secrets.PR8_GPU_TRANSPORT_TOKEN }}
+        run: bash base/tools/isaac-remote/tunnel.sh open
+      # The trials of one lane run one after the other: the host queue expires a job that waits
+      # more than ten minutes behind its own lane.
+      - name: Trials
+        env:
+          KIMI_CODE_API_KEY: ${{ matrix.lane.harness != 'oracle' && secrets.KIMI_CODE_API_KEY || '' }}
+          COMMAND: ${{ needs.route.outputs.command }}
+          TASK_PATH: ${{ needs.route.outputs.task_path }}
+          HEAD_SHA: ${{ needs.route.outputs.head_sha }}
+          HARNESS: ${{ matrix.lane.harness }}
+          GPU: ${{ matrix.lane.gpu }}
+          TRIALS: ${{ needs.route.outputs.trials }}
+        run: |
+          CHEAT=""; [ "$COMMAND" = cheat ] && CHEAT="--cheat"
+          for TRIAL in $(seq 1 "$TRIALS"); do
+            python base/tools/isaac-remote/run.py --harness "$HARNESS" --gpu "$GPU" --task-path "$TASK_PATH" --tier gpu $CHEAT \
+              --task-repo pr --source-sha "$HEAD_SHA" --request-id "$COMMAND-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$HARNESS-$TRIAL" \
+              --token-file "$RUNNER_TEMP/ziwu-transport/token" --output "comparison-output/$HARNESS-gpu$GPU-$TRIAL" || true
+          done
+      - name: Confirm remote cleanup
+        if: always()
+        run: |
+          if test -S "$RUNNER_TEMP/ziwu-transport/socket"; then
+            python base/tools/isaac-remote/cleanup.py --output comparison-output --token-file "$RUNNER_TEMP/ziwu-transport/token"
+          fi
+      - name: Close transport
+        if: always()
+        run: bash base/tools/isaac-remote/tunnel.sh close
+      - name: Show measured results
+        if: always()
+        run: python base/tools/isaac-remote/report.py --output comparison-output >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-trials-${{ matrix.lane.harness }}-gpu${{ matrix.lane.gpu }}
+          path: |
+            base/work/
+            comparison-output/
+          retention-days: 30
+
+  comment:
+    needs: [route, lanes]
+    if: always() && needs.route.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          sparse-checkout: tools/isaac-remote/trials_comment.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gpu-trials-*
+          path: downloaded
+      - name: Post the results
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          COMMAND: ${{ needs.route.outputs.command }}
+          TASK_PATH: ${{ needs.route.outputs.task_path }}
+          HEAD_SHA: ${{ needs.route.outputs.head_sha }}
+        run: |
+          mkdir -p downloaded
+          python3 tools/isaac-remote/trials_comment.py --root downloaded --command "$COMMAND" --task-path "$TASK_PATH" \
+            --sha "$HEAD_SHA" --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > comment.md
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file comment.md

@@ -1,0 +1,404 @@
+
+# LLM configuration for CI workflows
+#
+# llm_provider selects the GATEWAY (how we authenticate + which base URL we hit).
+# The downstream model host (anthropic/bedrock/openai/openrouter/...) is NOT a
+# separate mode — it is carried in the model slug's @provider/ prefix and the
+# gateway routes on it. Options:
+#   - "direct": Uses ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY secrets
+#   - "ppapi": OpenAI-compatible proxy (host app-us.ppapi.ai). Uses a single
+#               PPAPI_API_KEY + PPAPI_BASE_URL. The canonical base_url is the
+#               /v1 surface (https://app-us.ppapi.ai/v1, the default); the
+#               workflow normalizes it and derives per-SDK URLs — host + /v1 for
+#               OpenAI, bare host for the Anthropic SDK (it appends /v1/messages).
+#               One key feeds both ANTHROPIC_API_KEY and OPENAI_API_KEY. Gemini
+#               routes over the OpenAI-compatible surface (openai/<model>).
+#               (Formerly named "proxy" with separate PROXY_* secrets.)
+#   - "mercor": Mercor router (host api.appintheloop.com). OpenAI-compatible
+#               chat-completions on a single MERCOR_API_KEY (+ optional
+#               MERCOR_BASE_URL override; the canonical base is
+#               https://api.appintheloop.com/v1). The key is scoped to a model
+#               GROUP in the router dashboard, so a slug only resolves if that
+#               group serves it — the `gpt-codex-stable-l` group serves gpt-5.4,
+#               gpt-5.4-mini, gpt-5.5, gpt-5.6, gpt-5.6-luna, gpt-5.6-sol,
+#               gpt-5.6-terra and the codex-auto-review alias (which resolves to
+#               gpt-5.6-sol). Chat-completions ONLY: /v1/models reports
+#               supported_endpoint_types ["openai"] for every model, so there is
+#               no /v1/responses surface and the codex agent cannot run here;
+#               and there is no Anthropic-native surface, so claude-code stays
+#               on `direct`. terminus-2 judges are the supported use.
+#   - "portkey": Portkey gateway (https://api.portkey.ai). Uses PORTKEY_API_KEY
+#               (+ optional PORTKEY_BASE_URL). Auth shape differs per agent:
+#                 * claude-code — real key rides in ANTHROPIC_CUSTOM_HEADERS via
+#                   --ae (agent strips the @provider/ slug prefix, so the
+#                   provider must be a header); set `portkey_provider:` on the
+#                   agent to override the default @anthropic (e.g. @bedrock).
+#                 * terminus-2 with an `anthropic/...` model — native Anthropic
+#                   path via ANTHROPIC_AUTH_TOKEN, prompt caching ON.
+#                 * terminus-2 with an `openai/...` model — OpenAI-compatible
+#                   surface (openai/@provider/model), incl. Claude w/o caching.
+#               Model slugs carry the @provider/ prefix, e.g.
+#               anthropic/@anthropic/claude-opus-4-8, openai/@openai/gpt-5.5.
+#               Multiple Portkey keys: add `portkey_key: <SECRET_NAME>` to an agent to
+#               use a specific secret (e.g. PORTKEY_API_KEY_LAUDE) instead of the default
+#               PORTKEY_API_KEY — so different agents can use different Portkey accounts/
+#               keys in the same run. The named secret must exist in the repo's (and the
+#               fork's, for fork testing) Actions secrets; if omitted, PORTKEY_API_KEY.
+
+# Gateway endpoints. `llm_provider` on any key below names one of these; the
+# host lives here and nowhere else. Eight copies of these URLs used to sit in
+# the workflows' case blocks and they drifted -- a mercor branch in review.yml
+# defaulted to ppapi's host, which would have sent a mercor key to the wrong
+# gateway. .github/actions/gateway-env reads this map.
+#
+# `api_key_secret` documents which repo secret carries the credential; the
+# workflows pass it explicitly, since a composite action cannot read `secrets`.
+# `surfaces` records what the gateway actually serves -- consult it before
+# pointing an agent at a gateway, e.g. codex needs `responses` and claude-code
+# needs `anthropic`.
+gateways:
+  ark:
+    # Volcengine Ark Coding Plan. Anthropic surface at this host, OpenAI at /v3.
+    # Do not use https://ark.cn-beijing.volces.com/api/v3: it bills outside the plan.
+    base_url: https://ark.cn-beijing.volces.com/api/coding
+    api_key_secret: ARK_API_KEY
+    surfaces: [anthropic, openai]
+  ppapi:
+    base_url: https://app-us.ppapi.ai/v1
+    api_key_secret: PPAPI_API_KEY
+    surfaces: [openai, anthropic, responses]
+  mercor:
+    base_url: https://api.appintheloop.com/v1
+    api_key_secret: MERCOR_API_KEY
+    # /v1/models reports supported_endpoint_types ["openai"] per model, while
+    # the router's /api/pricing lists an `openai-response` endpoint -- the two
+    # disagree and codex has never been exercised here, so `responses` is
+    # deliberately absent until a real run proves it.
+    surfaces: [openai]
+  portkey:
+    base_url: https://api.portkey.ai
+    api_key_secret: PORTKEY_API_KEY
+    surfaces: [openai, anthropic]
+  kimi:
+    # Kimi Code official endpoint, the route the GPU pool trials use
+    # (tools/isaac-model-comparison/routes.py). Anthropic Messages at the bare
+    # host (claude-code, rubric_review.py), Responses at host + /v1 (codex), chat
+    # completions at host + /v1 (terminus-2 judges). Key: KIMI_CODE_API_KEY.
+    base_url: https://api.kimi.com/coding
+    api_key_secret: KIMI_CODE_API_KEY
+    surfaces: [anthropic, responses, openai]
+
+# /test command (test-trials.yml): a cheap smoke trial any PR author can run on
+# their own PR, before asking a maintainer for /run. Deliberately not
+# configurable from the comment -- one agent, one model, one trial, docker only
+# -- so an open command cannot be pointed at the frontier models or the
+# Modal/GPU backends. terminus-2 keeps the model calls on the runner, so the key
+# never enters the task container. `enabled: false` turns /test off: the bot then
+# only replies that it is not enabled (the public export sets it).
+test_run:
+  # Off on this repository: /test replies that it is not enabled; maintainers use /run.
+  enabled: false
+
+# Harbor Hub uploads for review rollouts (/run, /cheat, /analyze, /review).
+# When enabled and HARBOR_API_KEY is set, CI runs `harbor upload` on agent and
+# judge job dirs and posts Hub links on the PR comment so reviewers/contributors
+# can browse trajectories without downloading Actions artifacts.
+# See .github/scripts/upload_to_harbor_hub.py and TASK_REVIEW_AUTOMATION.md.
+harbor_hub:
+  upload: true
+  # Private by default. Trial rollouts are uploaded under a personal account,
+  # and a public job is world-readable forever (unlike Actions artifacts, which
+  # expire at 90 days) -- including trials for tasks still under review. Use
+  # share_orgs/share_users to widen access, or `--public` on a deliberate
+  # one-off upload.
+  visibility: private
+  share_orgs: []
+  share_users: []
+
+# /run and /cheat commands
+harbor_run:
+  trials: 1
+
+  # Environment backend for /run and /cheat trials.
+  # Options: docker (default, runs on GH Actions runner), modal, daytona, e2b, runloop, gke, apple-container
+  # Modal requires MODAL_TOKEN_ID and MODAL_TOKEN_SECRET repo secrets.
+  env: docker
+
+  # Environment backend for /validate (oracle and nop).
+  # Defaults to docker (fast smoke test on the GH runner). Set to `modal` for
+  # repos whose tasks routinely exceed the GH runner's 4 CPUs / ~16 GB RAM.
+  # Override per-comment with `/validate env=<backend>`.
+  validate_env: docker
+
+  # Per-agent `run:` / `cheat:` booleans pick which commands use each agent.
+  # Both default to true when omitted — set one to false to drop an agent from
+  # that command without commenting it out.
+  #
+  # Two trial agents, both Kimi K3.1 Pro; either can be the default and the other is
+  # the fallback:
+  #   - claude-code on the Volcengine Ark Coding Plan (llm_provider: ark, ARK_API_KEY);
+  #   - qoder, the Qoder CLI on QODER_PERSONAL_ACCESS_TOKEN.
+  # Default (2026-11-16): claude-code on Ark runs on a bare /run, a bare /cheat and the
+  # auto-trial dispatch, because the Qoder account is out of credits. Name the other one
+  # to use it for one run: `/run agents=qoder`, `/cheat agents=qoder`, or both with
+  # `agents=claude-code,qoder`. To switch the default, swap the run/cheat booleans of
+  # the two entries. An explicit `agents=` entry keeps its config entry (gateway,
+  # kwargs) even when it is off by default. codex stays on the Kimi Code endpoint and
+  # off: Ark serves no Responses API.
+  agents:
+    - agent: qoder
+      # tools/qoder-harbor (qodercli 1.1.87 installed in the task container per
+      # trial, print mode, stream-json kept in logs/agent/qodercli.jsonl) on the
+      # QODER_PERSONAL_ACCESS_TOKEN secret; only qoder trials receive that secret,
+      # per exec, and it is redacted by value from harbor-output. The model is a
+      # Qoder model id. 2026-11-16: the display name Kimi-K3.1-Pro is refused
+      # ("Model ... is not available", PR #107), so the trial names Qoder's moving alias
+      # `kmodel_latest`, which the adapter checks, so a trial on another model is an
+      # execution error, not a score. Qoder bills in credits and reports zero tokens,
+      # so its cost/token columns stay empty (credits are in the agent metadata).
+      # Docker (CPU) tasks only: the non-docker single job and the GPU pool do not
+      # run it.
+      # `none`: qodercli talks to Qoder itself, so no LLM gateway env is exported.
+      model: kmodel_latest
+      llm_provider: none
+      # 2026-11-16: off by default while the Qoder account has no credits; `agents=qoder`.
+      run: false
+      cheat: false
+    - agent: claude-code
+      # Direct to Anthropic on the ANTHROPIC_API_KEY secret — no gateway in the
+      # path. The `direct` branch exports ANTHROPIC_API_KEY and leaves
+      # ANTHROPIC_BASE_URL unset, so the SDK hits api.anthropic.com itself.
+      #
+      # Gateway history, in case trials start failing and a fallback is wanted:
+      #   - ppapi hung under agent load and stalled long runs to timeout.
+      #   - Portkey @anthropic on PORTKEY_API_KEY_LAUDE was the fix for that and
+      #     ran fine. To revert, restore:
+      #         llm_provider: portkey
+      #         portkey_provider: "@anthropic"
+      #         portkey_key: PORTKEY_API_KEY_LAUDE
+      # Note the two paths have different failure signatures: direct surfaces
+      # Anthropic rate limits / 429s against our own account quota, where the
+      # Portkey route pooled that across the gateway key.
+      #
+      # Model MUST stay the bare Anthropic id (no `anthropic/` prefix) — harbor's
+      # claude-code agent strips a `provider/` prefix only on the direct path, and
+      # a slash-less id makes that strip a no-op. (On a gateway path it passes
+      # ANTHROPIC_MODEL through verbatim — claude_code.py: "keep full model name" —
+      # so a prefixed slug would reach Anthropic as-is and 404 with
+      # "model ... may not exist". Bare is correct on both.)
+      # 2026-09-23: claude-opus-5-5 replaces claude-fable-5-1. Opus 5.5 is the
+      # dateless pinned ID, 1M context / 128K output like Fable 5.1, thinking
+      # always on (thinking:disabled is a 400 at every effort level, so effort
+      # is the only depth control). Cost note: $4/$20 per MTok vs Fable 5.1's
+      # $10/$50, so expect trial spend to drop by more than half.
+      # 2026-09-01: claude-fable-5-1 had replaced claude-opus-5 ($5/$25).
+      # 2026-11-10 (Robotics-Bench): /run and /cheat use Kimi k3.1 pro on the Kimi
+      # Code official endpoint (gateway `kimi`), with the model, endpoint,
+      # effort and harness versions of the GPU pool trials
+      # (tools/isaac-model-comparison/routes.py), so CPU and GPU task results
+      # are comparable. Rate limits on this key surface as "engine overloaded"
+      # and end a trial early; count those as infrastructure errors, not scores.
+      # Earlier: claude-opus-5-5 over ppapi, reasoning_effort xhigh.
+      # 2026-11-16: the same model on the Volcengine Ark Coding Plan (gateway `ark`), the
+      # judges' route; the GPU pool trials stay on the Kimi Code endpoint. Ark's id for
+      # the model is kimi-k3.1-pro, and every Claude Code model alias maps to it.
+      # Default agent again (qoder is out of credits). Back to Kimi Code:
+      #   model: k3.1-pro
+      #   llm_provider: kimi
+      model: kimi-k3.1-pro
+      llm_provider: ark
+      run: true
+      cheat: true
+      kwargs:
+        version: 2.1.318
+        reasoning_effort: high
+    # Codex via ppapi. ppapi does NOT serve the OpenAI /v1/responses websocket
+    # codex prefers (it used to 404, which is why codex ran on Portkey with
+    # PORTKEY_API_KEY_SNORKEL). Until 2026-08-14 codex fell back to HTTPS after
+    # the failed dial; then the upgrade started returning HTTP 400 `websocket:
+    # bad handshake` and codex began failing the turn instead, killing every
+    # trial at 2-5s. Fixed in run-trials.yml / run-cheat-trials.yml, which write
+    # a codex config.toml selecting a `ppapi` model provider with
+    # supports_websockets = false (the built-in `openai` provider hardcodes it
+    # true and cannot be overridden) and pass it as `--ak config=<path>`. If
+    # ppapi ever serves the websocket, that block can be dropped.
+    # If trials fail with a 404/handshake error on /v1/responses, revert to:
+    #   llm_provider: portkey
+    #   portkey_key: PORTKEY_API_KEY_SNORKEL
+    # Model stays the BARE slug: codex talks the OpenAI surface directly (no
+    # litellm in the path), so no `openai/` prefix — that prefix is only for the
+    # terminus-2 judges below. The ppapi branch exports OPENAI_API_KEY and
+    # OPENAI_BASE_URL (host + /v1) from PPAPI_API_KEY/PPAPI_BASE_URL.
+    - agent: codex
+      # 2026-11-10 (Robotics-Bench): /run and /cheat use Kimi k3.1 pro on the Kimi
+      # Code official endpoint (gateway `kimi`), with the model, endpoint,
+      # effort and harness versions of the GPU pool trials
+      # (tools/isaac-model-comparison/routes.py), so CPU and GPU task results
+      # are comparable. Rate limits on this key surface as "engine overloaded"
+      # and end a trial early; count those as infrastructure errors, not scores.
+      # Earlier: gpt-6-astra over ppapi, reasoning_effort xhigh (history below).
+      model: k3.1-pro
+      # 2026-08-22: on mercor, so no OpenAI-model traffic is left on ppapi.
+      # ppapi is dry -- balance $0.121772 against the $0.275130 hold a codex
+      # turn needs -- and it is not degraded but dead: both codex trials of the
+      # 10:18 /run on PR 799 died in ~12s at $0.00 with
+      # `403 pre-deduction of quota failed` from app-us.ppapi.ai/v1/responses, and a single-trial
+      # probe at 11:40 did the same. 54ede57b moved the judges here for the same
+      # reason; this finishes the move.
+      #
+      # UNPROVEN SURFACE -- treat the first run as the test. codex speaks only
+      # the Responses API and mercor's own metadata disagrees with itself about
+      # serving it: /v1/models advertises supported_endpoint_types ["openai"]
+      # per model, while /api/pricing lists an `openai-response` endpoint at
+      # /v1/responses. The `surfaces:` list above therefore still omits
+      # `responses`. What makes this worth trying anyway is that the downside is
+      # already realised: on ppapi the pass rate is 0 by gateway error, so a
+      # mercor 404 leaves us no worse off and costs $0. The mercor branch in
+      # run-trials.yml / run-cheat-trials.yml writes the same config.toml shape
+      # the ppapi one does (supports_websockets = false, forcing HTTPS), so this
+      # is a one-line flip either way.
+      #
+      # Failure signature: trials dying at ~2-5s on a 404 or a `websocket: bad
+      # handshake`. If that happens, the fallback is `portkey` +
+      # portkey_key: PORTKEY_API_KEY_SNORKEL -- which codex ran on before ppapi
+      # served this surface, though that key was last seen returning 412.
+      # Add `responses` to mercor's `surfaces:` once a trial confirms it works.
+      # 2026-08-22, superseding the mercor line above: `direct`. This is the
+      # cleanest path for codex of the four gateways, not just a policy choice --
+      # the direct branch sets no OPENAI_BASE_URL, so codex talks its native
+      # Responses API to api.openai.com and none of the config.toml
+      # supports_websockets machinery below is needed. It also sidesteps the open
+      # question about whether mercor serves /v1/responses at all, which never
+      # got a clean test: both single-agent probes on PR 799 died earlier in the
+      # harness on `Model name is required` (fixed in 8d1cbbfa) and the run after
+      # that fix was cancelled before it reported.
+      #
+      # 2026-08-22, superseding the `direct` line above: back on ppapi now that
+      # it is funded again -- the same restore b1a460c0 made on 08-16, and the
+      # third time this account has drained and been topped up. ppapi serves
+      # /v1/responses (verified 2026-08-05), and codex last ran on it cleanly at
+      # 03:45Z today on PR 1011: two trials, 24m and 26m, $5.29 and $5.42. The
+      # drain came ~50 minutes later, so it was the balance that failed here,
+      # not the surface.
+      #
+      # Failure signature specific to an empty balance: trials die in ~12s at
+      # $0.00 with `403 pre-deduction of quota failed` from app-us.ppapi.ai/v1/responses. That
+      # scores every trial 0 while measuring nothing, so read a sudden all-zero
+      # /run as a funding check before reading it as a task result.
+      # Fallbacks, in order: `direct` (OPENAI_API_KEY does now exist, set 12:01Z
+      # today, but the sol/terra slugs have only ever been served through
+      # routers, so api.openai.com may 404 the name outright), then `mercor`,
+      # then `portkey` + portkey_key: PORTKEY_API_KEY_SNORKEL.
+      #
+      # 2026-08-31: DISABLED (run/cheat both false) — maintainer decision not to
+      # use codex for now; only the judges (analyze/review/proposal_review)
+      # moved to mercor. Gateway restored to ppapi (its last-known-working
+      # surface for the Responses API) so re-enabling is a two-boolean flip, not
+      # a gateway test — mercor's Responses surface remains unproven.
+      #
+      # 2026-09-20: RE-ENABLED on gpt-6-astra (was gpt-5.6-sol), still over
+      # ppapi — the two-boolean flip the 08-31 note describes, plus a model
+      # bump. Gateway is unchanged, so nothing about the Responses-surface
+      # story above changes; what is new here is the slug.
+      #
+      # TREAT THE FIRST /run AS THE TEST. Two things are unverified:
+      #   - The slug. `gpt-6-astra` has never run in this repo, and the ppapi
+      #     catalogue is not pinned anywhere here. A slug ppapi does not serve
+      #     comes back as a 404 at ~2-5s, $0.00, which scores every trial 0
+      #     while measuring nothing — read an instant all-zero /run as a slug
+      #     or funding problem before reading it as a task result. (The other
+      #     ~12s/$0.00 signature, `403 pre-deduction of quota failed`, is an empty ppapi
+      #     balance; see the funding note above.)
+      #   - The codex version pin below (0.146.1, from 2026-08). It predates
+      #     this model, so if the CLI validates model names client-side the pin
+      #     may reject `gpt-6-astra` outright. If it does, the fix is to bump
+      #     the pin, not to change the slug.
+      # Fallbacks, in order: revert the slug to `gpt-5.6-sol` (last known to run
+      # clean on ppapi — two trials, 24m/26m, $5.29/$5.42 on PR 1011), then
+      # `mercor` (Responses surface unproven), then `portkey` +
+      # portkey_key: PORTKEY_API_KEY_SNORKEL.
+      llm_provider: kimi
+      # 2026-11-12: off by default (qoder is the default agent); `agents=codex`.
+      run: false
+      cheat: false
+      kwargs:
+        reasoning_effort: high
+        # 0.155.1 is the version verified with k3.1-pro on the GPU pool trials.
+        version: 0.155.1
+
+# harbor analyze: job summary, per-trial summaries, reward-hacking checks.
+# Top-level (not under harbor_run) because it runs both after /run trials AND
+# on-demand via /analyze against an existing trial run's artifacts.
+# Read by run-trials.yml, run-cheat-trials.yml, and analyze-trials.yml.
+#
+# As of harbor 0.20, `harbor analyze` runs the analysis as an agent job inside
+# a docker environment (same runner as trials) — so it takes an `agent` +
+# `model` and routes exactly like a harbor_run agent. We judge on GPT-6 Astra
+# via the codex agent (2026-09-23; GPT-5.6 Sol until then, and terminus-2
+# before 2026-09-21 — see the note on
+# `agent` below). codex speaks the OpenAI Responses API directly, so on the
+# current `direct` gateway it dials api.openai.com with OPENAI_API_KEY and no
+# base-URL override — none of the config.toml supports_websockets machinery is
+# in the path (the gateway-env action only writes that file on ppapi/mercor).
+# codex therefore takes the BARE slug: the `openai/` prefix is litellm's, and
+# litellm is only in the path for terminus-2 — codex would pass the prefix
+# through verbatim and 404 on the model name. (Switching back to terminus-2
+# means restoring the prefix: `openai/` selects litellm's OpenAI-compatible
+# chat-completions path — reads OPENAI_API_KEY/OPENAI_BASE_URL, set by the
+# analyze steps in run-trials.yml / run-cheat-trials.yml / analyze-trials.yml —
+# while `anthropic/` selects the native Anthropic surface.)
+# Astra is the GPT-6 flagship; before it, Sol was the flagship tier of the 5.6
+# family ($5/$30 per MTok vs Terra's $2.50/$15) — trial analysis judges reward
+# hacking and fairness, where a miss is costly, so it runs at the top tier
+# (`/review` and `proposal_review` stay on Sol for now).
+# Note: harbor 0.20 dropped `--job-prompt`, so there is no job-level aggregate
+# summary; the per-trial rubric (rubrics/trial-analysis.toml) still applies, and
+# the comment renderer rolls each criterion up across trials (🟢/🟡/🔴).
+#
+# `/analyze agent=<a> model=<m>` overrides both per-run — and the model must be
+# written in the form the chosen agent expects (bare for codex, `openai/`-prefixed
+# for terminus-2). The codex workarounds need no config of their own:
+# analyze-trials.yml applies the 0.146.1 version pin (npm `latest` is the broken
+# 0.147.0) whenever the judge agent is codex, and the gateway-env action writes
+# the config.toml with supports_websockets = false on the ppapi/mercor branches.
+# An optional `kwargs:` map here becomes repeated `--ak key=value` flags, same
+# shape as harbor_run.agents[].kwargs; setting `version:` there overrides the pin.
+analyze:
+  # 2026-11-16: Kimi K3.1 Pro on the Volcengine Ark Coding Plan (llm_provider: ark).
+  # Robotics-Bench (2026-11-10): judges run on Kimi k3.1 pro through the Kimi Code
+  # endpoint (KIMI_CODE_API_KEY), the same key and model as the trial agents.
+  # This repo has no PPAPI/OpenAI/Anthropic keys; on ppapi every analysis was
+  # dropped with "Missing credentials" (PR #34 /run, 2 of 2 dropped).
+  # claude-code, not terminus-2: on chat completions Kimi sometimes answers a
+  # turn with reasoning only, terminus-2 sends that empty assistant message back,
+  # and Kimi rejects it ("message ... with role 'assistant' must not be empty"),
+  # dropping the analysis (#34: 1 of 2 dropped). claude-code uses the Anthropic
+  # surface, which carries thinking blocks properly: the same run re-judged with
+  # claude-code analyzed 2 of 2. Bare model slug for claude-code.
+  # The ppapi/mercor/direct history is in the upstream repository (docs/UPSTREAM.md).
+  enabled: true
+  agent: claude-code
+  model: kimi-k3.1-pro
+  llm_provider: ark
+
+# /review command (task implementation review). `harbor check` runs the rubric
+# review as an agent job; claude-code on the kimi gateway gets
+# ANTHROPIC_BASE_URL=https://api.kimi.com/coding with every model alias mapped
+# to k3.1-pro. `review.model` also drives the author-fit/COI passes in
+# ci_checks/rubric_review.py, which send a bare non-GPT slug to the Anthropic
+# SDK -- the Kimi Code endpoint serves Anthropic Messages too.
+review:
+  # 2026-11-16: Kimi K3.1 Pro on the Volcengine Ark Coding Plan (llm_provider: ark).
+  agent: claude-code
+  model: kimi-k3.1-pro
+  llm_provider: ark
+
+# Proposal review (auto-reviews on discussion posts, and re-runs on a `/review`
+# comment in the Task Proposals category). SDK-based via ci_checks/rubric_review.py,
+# no agent: a bare `k3.1-pro` goes to the Anthropic SDK, and proposal-review.yml's
+# kimi branch sets ANTHROPIC_BASE_URL to the bare Kimi Code host (the SDK appends
+# /v1/messages). Verified locally on proposal #38: full review, decision parsed.
+proposal_review:
+  # 2026-11-16: Kimi K3.1 Pro on the Volcengine Ark Coding Plan (llm_provider: ark).
+  model: kimi-k3.1-pro
+  llm_provider: ark

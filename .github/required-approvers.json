@@ -1,0 +1,8 @@
+{
+  "_comment": "Merge gate config (.github/workflows/required-approvals.yml). Task PRs (changing a path in task_paths) need approval from their assigned domain and technical reviewers, plus final once assigned. PRs listed under pull_requests need exactly the named logins instead. Approvals must be on the current head commit unless approval_must_match_head is false.",
+  "approval_must_match_head": true,
+  "task_paths": [
+    "tasks/"
+  ],
+  "pull_requests": {}
+}

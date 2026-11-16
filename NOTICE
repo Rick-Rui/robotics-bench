@@ -1,0 +1,7 @@
+Robotics-Bench
+Copyright 2026 ZIWU AI
+
+This product includes software adapted from Terminal-Bench-Science
+(https://github.com/harbor-framework/terminal-bench-science), licensed under the
+Apache License, Version 2.0: parts of the static checks in ci_checks/, the review
+rubrics in rubrics/, and the review and validation workflows in .github/.

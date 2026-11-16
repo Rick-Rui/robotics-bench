@@ -1,0 +1,11 @@
+# Every issue goes through one of the two forms so it lands labelled and
+# routed: `task fix` reaches the task's original reviewers automatically,
+# `infra` reaches the maintainers. Task ideas and questions aren't issues.
+blank_issues_enabled: false
+contact_links:
+  - name: Propose a new task
+    url: https://github.com/ZIWU-AI/robotics-bench/discussions/categories/task-proposals
+    about: New task ideas go to Discussions → Task Proposals, not the issue tracker.
+  - name: Ask a question
+    url: https://github.com/ZIWU-AI/robotics-bench/discussions
+    about: Scope checks, "is this in range?", and general questions — Robotics-Bench Discussions.
