@@ -719,14 +719,14 @@ e.g. `/review agent=terminus-2 model=openai/gpt-5.6-terra`. The comment footer s
 
 **`/run` overrides:**
 - **`trials=N`** — Number of trials per agent (max 10)
-- **`agents=list`** — Comma-separated `agent:model` pairs. The `:model` half is optional — `agents=codex` runs that agent alone on the model (and gateway) `llm-config.yml` assigns it, which is the cheap way to re-test one arm. The default trial agent is `claude-code` on the Ark Coding Plan; `agents=qoder` runs the Qoder CLI instead (both are Kimi K3.1 Pro). `harbor_run.agents` in `llm-config.yml` sets which one is the default
+- **`agents=list`** — Comma-separated `agent:model` pairs. The `:model` half is optional — `agents=codex` runs that agent alone on the model (and gateway) `llm-config.yml` assigns it, which is the cheap way to re-test one arm. The default trial agent is `qoder` (the Qoder CLI); `agents=claude-code` runs Claude Code on the Ark Coding Plan instead (both are Kimi K3.1 Pro). `harbor_run.agents` in `llm-config.yml` sets which one is the default
 - **`analyze=true|false`** — Run `harbor analyze` on completed trials (default: `true`)
 - **`analyze_model=model-name`** — Model used for analysis (default: `sonnet`)
 - **`env=backend`** — Environment backend for trials (see [Environment backend](#environment-backend))
 - **`hints`** / **`hints=1,3`** — Attach the task's own hints to the instruction (see [Hinted runs](#hinted-runs)). Bare `hints` attaches all of them; a list attaches exactly those
 
 **`/cheat` overrides:**
-- **`agents=list`** — Comma-separated `agent:model` pairs. The `:model` half is optional — `agents=codex` runs that agent alone on the model (and gateway) `llm-config.yml` assigns it, which is the cheap way to re-test one arm. The default trial agent is `claude-code` on the Ark Coding Plan; `agents=qoder` runs the Qoder CLI instead (both are Kimi K3.1 Pro). `harbor_run.agents` in `llm-config.yml` sets which one is the default
+- **`agents=list`** — Comma-separated `agent:model` pairs. The `:model` half is optional — `agents=codex` runs that agent alone on the model (and gateway) `llm-config.yml` assigns it, which is the cheap way to re-test one arm. The default trial agent is `qoder` (the Qoder CLI); `agents=claude-code` runs Claude Code on the Ark Coding Plan instead (both are Kimi K3.1 Pro). `harbor_run.agents` in `llm-config.yml` sets which one is the default
 - **`analyze=true|false`** — Run `harbor analyze` on completed trials (default: `true`)
 - **`analyze_model=model-name`** — Model used for analysis (default: `sonnet`)
 - **`env=backend`** — Environment backend for trials (see [Environment backend](#environment-backend))
@@ -824,13 +824,13 @@ Models are reached through gateways defined once under `gateways:` in [`.github/
 
 | Used by | Secret |
 |---------|--------|
-| Gateway `ark`, the Volcengine Ark Coding Plan (judges for `/review`, `/analyze`, proposal review; `claude-code` trials, the default `/run` and `/cheat` agent) | `ARK_API_KEY` |
+| Gateway `ark`, the Volcengine Ark Coding Plan (judges for `/review`, `/analyze`, proposal review; `claude-code` trials, the fallback trial agent: `agents=claude-code`) | `ARK_API_KEY` |
 | Gateway `kimi` (`codex` trials and the GPU pool trials) | `KIMI_CODE_API_KEY` |
 | Gateway `ppapi` | `PPAPI_API_KEY` (+ optional `PPAPI_BASE_URL`) |
 | Gateway `mercor` | `MERCOR_API_KEY` (+ optional `MERCOR_BASE_URL`) |
 | Gateway `portkey` | `PORTKEY_API_KEY` (+ optional `PORTKEY_BASE_URL`, `PORTKEY_PROVIDER`); an agent may name another secret with `portkey_key` |
 | `llm_provider: direct` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, per configured models |
-| `qoder` agent (the alternative trial agent on docker tasks: `agents=qoder`) | `QODER_PERSONAL_ACCESS_TOKEN` |
+| `qoder` agent (the default `/run` and `/cheat` agent on docker tasks) | `QODER_PERSONAL_ACCESS_TOKEN` |
 | GPU tier (`/validate`, `/scene`, `/oracle`, `/run`, `/cheat`, `/test` on a `tier:gpu` PR) | The GPU pool transport secrets named in `gpu-task-controls.yml`, `gpu-scene-check.yml` and `gpu-trials.yml` |
 | [Authorship Check](#authorship-check) | `PANGRAM_API_KEY` |
 | [Harbor Hub uploads](#harbor-hub-uploads) | `HARBOR_API_KEY` (soft-required: without it, uploads are skipped and the comment says so) |

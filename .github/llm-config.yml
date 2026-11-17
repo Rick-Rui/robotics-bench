@@ -138,9 +138,10 @@ harbor_run:
   # the fallback:
   #   - claude-code on the Volcengine Ark Coding Plan (llm_provider: ark, ARK_API_KEY);
   #   - qoder, the Qoder CLI on QODER_PERSONAL_ACCESS_TOKEN.
-  # Default (2026-11-16): claude-code on Ark runs on a bare /run, a bare /cheat and the
-  # auto-trial dispatch, because the Qoder account is out of credits. Name the other one
-  # to use it for one run: `/run agents=qoder`, `/cheat agents=qoder`, or both with
+  # Default (2026-11-17): qoder runs on a bare /run, a bare /cheat and the auto-trial
+  # dispatch (11-16 it was claude-code on Ark while the Qoder account had no credits).
+  # Name the other one to use it for one run: `/run agents=claude-code`,
+  # `/cheat agents=claude-code`, or both with
   # `agents=claude-code,qoder`. To switch the default, swap the run/cheat booleans of
   # the two entries. An explicit `agents=` entry keeps its config entry (gateway,
   # kwargs) even when it is off by default. codex stays on the Kimi Code endpoint and
@@ -161,9 +162,9 @@ harbor_run:
       # `none`: qodercli talks to Qoder itself, so no LLM gateway env is exported.
       model: kmodel_latest
       llm_provider: none
-      # 2026-11-16: off by default while the Qoder account has no credits; `agents=qoder`.
-      run: false
-      cheat: false
+      # 2026-11-17: the default agent again (11-16 off while the account had no credits).
+      run: true
+      cheat: true
     - agent: claude-code
       # Direct to Anthropic on the ANTHROPIC_API_KEY secret — no gateway in the
       # path. The `direct` branch exports ANTHROPIC_API_KEY and leaves
@@ -202,13 +203,14 @@ harbor_run:
       # 2026-11-16: the same model on the Volcengine Ark Coding Plan (gateway `ark`), the
       # judges' route; the GPU pool trials stay on the Kimi Code endpoint. Ark's id for
       # the model is kimi-k3.1-pro, and every Claude Code model alias maps to it.
-      # Default agent again (qoder is out of credits). Back to Kimi Code:
+      # 2026-11-17: the fallback (qoder is the default again); `agents=claude-code`.
+      # Back to Kimi Code:
       #   model: k3.1-pro
       #   llm_provider: kimi
       model: kimi-k3.1-pro
       llm_provider: ark
-      run: true
-      cheat: true
+      run: false
+      cheat: false
       kwargs:
         version: 2.1.318
         reasoning_effort: high
