@@ -65,13 +65,14 @@ Two kinds of case are supported ([docs/TASK_TYPES.md](docs/TASK_TYPES.md)):
    `instruction.md` or in documentation inside the agent's image. Nothing the agent must not know may be exposed
    through `/v1/info` or any other answer.
 6. Counted operations and wall time MUST be budgeted by the service and stated in `instruction.md`. Calling
-   `finish` is submitting.
+   `finish` is submitting; an episode the agent did not finish MUST score 0.
 
 ### 3.3 Recording and verification
 
 7. Every request that can change the world, its result and the state after it MUST be written to the hash-chained,
    sealed recording of [tools/case-kit/casekit/recording.py](tools/case-kit/casekit/recording.py), and a root collect
-   hook MUST finish the episode and export the recording as an artifact.
+   hook MUST finish the episode, marking that finish as the collector's when the agent did not call it, and export
+   the recording as an artifact.
 8. The verifier MUST re-execute the recording in a fresh instance of the world, compare every recorded state, and
    evaluate the success check on the replayed states. It MUST NOT run the agent's program and MUST NOT trust any
    score computed by the service.
@@ -91,8 +92,9 @@ Two kinds of case are supported ([docs/TASK_TYPES.md](docs/TASK_TYPES.md)):
 
 14. `solution/solve.sh` MUST solve the case **closed loop through the same interface the agent has**, from what the
     agent can observe. A replayed trajectory is not a reference solution.
-15. The reference solution MUST score 1; an episode that only calls `finish` MUST score 0; an edited, truncated or
-    state-forged recording MUST score 0. The CPU gate checks all of these.
+15. The reference solution MUST score 1; an episode that only calls `finish` MUST score 0; an episode the agent did
+    not finish MUST score 0; an edited, truncated or state-forged recording MUST score 0. The CPU gate checks all of
+    these.
 
 ### 3.6 Provenance and resources
 

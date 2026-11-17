@@ -13,6 +13,7 @@ HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 from casekit import recording  # noqa: E402
 from casekit.episode import BadRequest, Episode, Refused, make_server, op  # noqa: E402
+from casekit.verify import load_export  # noqa: E402
 import gate  # noqa: E402
 import sync  # noqa: E402
 
@@ -91,12 +92,29 @@ class EnvelopeTest(unittest.TestCase):
         self.assertEqual([e["state"]["n"] for e in entries], [2, 2, 3, 3])
         self.assertEqual((seal["api"], seal["backend"], seal["used"]), ("counter-api-v1", "toy", {"actions": 3}))
 
+    def test_collector_finish(self):
+        self.call("bump", {})
+        self.assertTrue(self.call("finish", {"by": "collector"})[1]["ok"])
+        entries, _ = recording.verify(self.tmp / "rec")
+        self.assertEqual((entries[-1]["op"], entries[-1]["request"]), ("finish", {"by": "collector"}))
+        _, _, problems = load_export(self.tmp / "rec", api="counter-api-v1", backend="toy")
+        self.assertEqual(problems, ["the agent did not call finish; the collector sealed the episode"])
+
+    def test_agent_finish(self):
+        self.call("bump", {})
+        self.assertTrue(self.call("finish", {})[1]["ok"])
+        self.assertFalse(self.call("finish", {"by": "collector"})[1]["ok"])      # the collector comes too late
+        entries, _ = recording.verify(self.tmp / "rec")
+        self.assertEqual(entries[-1]["request"], {})
+        self.assertEqual(load_export(self.tmp / "rec", api="counter-api-v1", backend="toy")[2], [])
+
     def test_tampering_helpers(self):
         for _ in range(2):
             self.call("bump", {})
         self.call("finish", {})
         src = self.tmp / "rec"
-        for fn, expect in ((gate.tamper_state, "valid"), (gate.truncate, "valid"), (gate.edit_line, "broken")):
+        for fn, expect in ((gate.tamper_state, "valid"), (gate.truncate, "valid"), (gate.collector_finish, "valid"),
+                           (gate.edit_line, "broken")):
             d = self.tmp / fn.__name__
             shutil.copytree(src, d)
             fn(d)
