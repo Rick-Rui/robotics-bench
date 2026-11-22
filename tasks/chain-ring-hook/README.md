@@ -7,7 +7,7 @@ Swing a passive articulated chain ring onto a collidable hook using only its upp
 
 | | |
 |---|---|
-| **Author** | Rui Miao (ZIWU-AI) — 192702453+msnsdfl@users.noreply.github.com; Maofei Li (Nanjing University) — 148881440+StoicLee@users.noreply.github.com |
+| **Author** | Rick Ray (ZIWU-AI) — 192702453+msnsdfl@users.noreply.github.com; Maofei Li (Nanjing University) — 148881440+StoicLee@users.noreply.github.com |
 | **Profile** | https://github.com/Rick-Rui, https://github.com/StoicLee |
 | **Tags** | `manipulation` `mujoco` `chain` `swinging` `online-control` |
 | **Expert time estimate** | 30 minutes |
@@ -29,7 +29,7 @@ Contributors adapting PhysCapBench video cases to Robotics-Bench; this task is a
 
 | Contributor | Organization | Role |
 |---|---|---|
-| [Rui Miao (@Rick-Rui)](https://github.com/Rick-Rui) | ZIWU-AI | Primary task author |
+| [Rick Ray (@Rick-Rui)](https://github.com/Rick-Rui) | ZIWU-AI | Primary task author |
 | [Maofei Li (@StoicLee)](https://github.com/StoicLee) | Nanjing University | Co-author |
 
 ## Difficulty
@@ -54,4 +54,4 @@ Approved proposal: [Discussion 26](https://github.com/ZIWU-AI/robotics-bench/dis
 
 Task concept: ManiLadder SwingRing-v1. All scene geometry and control code are newly authored parametric primitives; no source video, third-party robot mesh or other task physics is packaged. Only reusable infrastructure is vendored from this repository's case-kit example. Detailed asset parameters are in the protected scene generator and scene configuration.
 
-Primary author Rui Miao is affiliated with ZIWU-AI. Rick-Rui and msnsdfl are the same person; proposal approval via msnsdfl is not independent human review.
+Primary author Rick Ray is affiliated with ZIWU-AI. Rick-Rui and msnsdfl are the same person; proposal approval via msnsdfl is not independent human review.

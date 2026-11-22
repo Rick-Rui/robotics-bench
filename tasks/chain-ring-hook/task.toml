@@ -6,18 +6,18 @@ artifacts = ["/app/output", "/var/lib/ring/export"]
 [task]
 name = "robotics-bench/chain-ring-hook"
 description = "Swing a passive articulated chain ring onto a collidable hook using only its upper endpoint, then release and withdraw; visual feedback and independent physics replay."
-authors = [{ name = "Rui Miao", email = "192702453+msnsdfl@users.noreply.github.com" }, { name = "Maofei Li", email = "148881440+StoicLee@users.noreply.github.com" }]
+authors = [{ name = "Rick Ray", email = "192702453+msnsdfl@users.noreply.github.com" }, { name = "Maofei Li", email = "148881440+StoicLee@users.noreply.github.com" }]
 keywords = ["manipulation", "mujoco", "chain", "swinging", "online-control"]
 
 [metadata]
-author_name = ["Rui Miao", "Maofei Li"]
+author_name = ["Rick Ray", "Maofei Li"]
 author_email = ["192702453+msnsdfl@users.noreply.github.com", "148881440+StoicLee@users.noreply.github.com"]
 author_organization = ["ZIWU-AI", "Nanjing University"]
 author_profile = ["https://github.com/Rick-Rui", "https://github.com/StoicLee"]
 tags = ["manipulation", "mujoco", "chain", "swinging", "online-control"]
 expert_time_estimate_hours = 0.5
 relevant_experience = "Contributors adapting PhysCapBench video cases to Robotics-Bench; this task is an AI-assisted MuJoCo adaptation of a ManiLadder task concept."
-conflicts_of_interest = "Primary author Rui Miao is affiliated with ZIWU-AI. Rick-Rui and msnsdfl are the same person; proposal approval via msnsdfl is not independent human review."
+conflicts_of_interest = "Primary author Rick Ray is affiliated with ZIWU-AI. Rick-Rui and msnsdfl are the same person; proposal approval via msnsdfl is not independent human review."
 
 [verifier]
 timeout_sec = 600.0
