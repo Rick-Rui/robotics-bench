@@ -1,0 +1,276 @@
+{
+  "layouts": [
+    {
+      "task": "helical-rope-wrap",
+      "seed": 117,
+      "kind": "nominal",
+      "radius": 0.08,
+      "pitch": 0.04,
+      "length": 1.0836023136501185,
+      "stiffness": 5e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 800,
+      "kind": "corner",
+      "radius": 0.08,
+      "pitch": 0.036,
+      "length": 1.079027815544272,
+      "stiffness": 3e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 801,
+      "kind": "corner",
+      "radius": 0.08,
+      "pitch": 0.036,
+      "length": 1.079027815544272,
+      "stiffness": 8e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 802,
+      "kind": "corner",
+      "radius": 0.08,
+      "pitch": 0.036,
+      "length": 1.087027815544272,
+      "stiffness": 3e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 803,
+      "kind": "corner",
+      "radius": 0.08,
+      "pitch": 0.036,
+      "length": 1.087027815544272,
+      "stiffness": 8e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 804,
+      "kind": "corner",
+      "radius": 0.08,
+      "pitch": 0.044,
+      "length": 1.0802369227256874,
+      "stiffness": 3e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 805,
+      "kind": "corner",
+      "radius": 0.08,
+      "pitch": 0.044,
+      "length": 1.0802369227256874,
+      "stiffness": 8e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 806,
+      "kind": "corner",
+      "radius": 0.08,
+      "pitch": 0.044,
+      "length": 1.0882369227256874,
+      "stiffness": 3e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 807,
+      "kind": "corner",
+      "radius": 0.08,
+      "pitch": 0.044,
+      "length": 1.0882369227256874,
+      "stiffness": 8e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 711,
+      "kind": "random",
+      "radius": 0.08,
+      "pitch": 0.04015199203854177,
+      "length": 1.0820761816079771,
+      "stiffness": 7.667644168911368e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 127,
+      "kind": "random",
+      "radius": 0.08,
+      "pitch": 0.03649973254186698,
+      "length": 1.0807733624597446,
+      "stiffness": 4.4966624002229916e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 903,
+      "kind": "random",
+      "radius": 0.08,
+      "pitch": 0.03702055028972094,
+      "length": 1.0846834905649065,
+      "stiffness": 5.9169833375262966e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 2026,
+      "kind": "random",
+      "radius": 0.08,
+      "pitch": 0.03743147850940349,
+      "length": 1.0843458031979791,
+      "stiffness": 5.336342005717426e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 81,
+      "kind": "random",
+      "radius": 0.08,
+      "pitch": 0.03947290632884505,
+      "length": 1.0812161958160045,
+      "stiffness": 7.560186595946545e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 421,
+      "kind": "random",
+      "radius": 0.08,
+      "pitch": 0.037458073705700784,
+      "length": 1.0808596711510299,
+      "stiffness": 4.3512113340239286e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 1999,
+      "kind": "random",
+      "radius": 0.08,
+      "pitch": 0.04065500112360721,
+      "length": 1.0834625507329545,
+      "stiffness": 5.126092764876037e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    },
+    {
+      "task": "helical-rope-wrap",
+      "seed": 31,
+      "kind": "random",
+      "radius": 0.08,
+      "pitch": 0.043225374487318884,
+      "length": 1.080650764393887,
+      "stiffness": 6.363654070501822e-05,
+      "segments": 60,
+      "rail_segments": 120,
+      "timestep": 0.002,
+      "budgets": {
+        "actions": 800,
+        "observations": 1000
+      }
+    }
+  ]
+}
