@@ -56,6 +56,7 @@ class Rope(Episode):
     def describe(self):
         return {'limits':sim.LIMITS,'max_step_m':sim.MAX_STEP_M,
                 'cameras':self.sim.cameras(),'markers':sim.marker_contract(),
+                'obstacles':sim.obstacle_contract(),
                 'image_convention':{'encoding':'base64 PNG RGB','pixel_origin':'top-left',
                                     'u':'right','v':'down','camera_forward':'into scene',
                                     'views':'front and top at the same simulation instant',

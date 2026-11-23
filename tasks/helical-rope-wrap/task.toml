@@ -5,7 +5,7 @@ artifacts = ["/app/output", "/var/lib/rope/export"]
 
 [task]
 name = "robotics-bench/helical-rope-wrap"
-description = "Infer an upright helical fixture frame and winding handedness from calibrated RGB views, then wrap a flexible rope twice into its groove using a force-limited Cartesian endpoint and proprioception."
+description = "Infer an upright helical fixture frame, its winding handedness and two collidable sweep-zone obstacles from calibrated RGB views, then wrap a flexible rope twice into its groove, weaving the rope and hand over the floor pylon and under the hanging baffle with a force-limited Cartesian endpoint and proprioception."
 authors = [{ name = "Rick Ray", email = "192702453+msnsdfl@users.noreply.github.com" }, { name = "Maofei Li", email = "148881440+StoicLee@users.noreply.github.com" }]
 keywords = ["manipulation", "mujoco", "deformable", "rope", "online-control"]
 
@@ -15,7 +15,7 @@ author_email = ["192702453+msnsdfl@users.noreply.github.com", "148881440+StoicLe
 author_organization = ["ZIWU-AI", "Nanjing University"]
 author_profile = ["https://github.com/Rick-Rui", "https://github.com/StoicLee"]
 tags = ["manipulation", "mujoco", "deformable", "rope", "online-control"]
-expert_time_estimate_hours = 2.0
+expert_time_estimate_hours = 3.0
 relevant_experience = "Contributors adapting PhysCapBench video cases to Robotics-Bench; this task is an AI-assisted MuJoCo adaptation of a ManiLadder task concept."
 conflicts_of_interest = "Primary author Rick Ray is affiliated with ZIWU-AI. Rick-Rui and msnsdfl are the same person; proposal approval via msnsdfl is not independent human review."
 
