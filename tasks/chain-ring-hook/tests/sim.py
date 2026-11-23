@@ -8,7 +8,7 @@ from physics import xml
 
 DT=.002
 HOME=np.array([0.,-.4,1.6])
-LIMITS=[[-.25,.25],[-.6,.65],[.75,1.95]]
+LIMITS=[[-.28,.28],[-.60,-.14],[.75,1.95]]
 
 class Sim:
     def __init__(self,cfg,dt=DT,ring_segments=32):
@@ -20,7 +20,7 @@ class Sim:
         self.chain_geoms={self.model.geom('link'+str(i)).id for i in range(8)}
         self.hook_geoms={self.model.geom('hookshaft').id,self.model.geom('hooktip').id}
         self.hand_geom=self.model.geom('hand').id
-        self.tip=np.array([0,cfg['hook_y'],cfg['hook_z']+.05])
+        self.tip=np.array([cfg['hook_x'],cfg['hook_y'],cfg['hook_z']+.05])
         self.target=HOME.copy();self.released=False;self.threaded=False;self.crossing=None
         self.touch_ring=False;self.other_grasp_contact=False;self.stable=0.;self.max_swing=0.
         self.renderer=None;self.seated=False;self.captured=False;self.release_time=None;self.release_after_entry=False;self.events=[];self.max_penetration=0.;self.ring_support=0.;self.chain_support=0.
@@ -47,7 +47,7 @@ class Sim:
             normal_speed=float(self.ring_velocity@cn)
             if radial<(.08*math.cos(math.pi/self.ring_segments)-.009):
                 if oldd>0>=d:
-                    self.threaded=bool(not self.released and radial<.058 and normal_speed>=.30 and self.ring_velocity[1]>0 and self.max_swing>.015)
+                    self.threaded=bool(not self.released and radial<.058 and normal_speed>=.30 and self.ring_velocity[1]>0 and self.max_swing>=.12)
                     self.crossing={'time':float(self.data.time),'speed':speed,'normal_speed':normal_speed,'radial':radial,'direction':float(self.ring_velocity[1]),'qualified':self.threaded}
                     self.events.append(self.crossing.copy())
                 else:
@@ -72,7 +72,7 @@ class Sim:
             elif moving and any(g not in self.chain_geoms|self.ring_geoms for g in pair):
                 unsupported=False
         # Segment-plane intersection of the hook shaft must lie inside the ring's actual aperture.
-        a=np.array([0,self.cfg['hook_y'],self.cfg['hook_z']]);b=a+np.array([0,.45,0])
+        a=np.array([self.cfg['hook_x'],self.cfg['hook_y'],self.cfg['hook_z']]);b=a+np.array([0,.45,0])
         den=float((b-a)@n);linked=False;topology_linked=False
         if abs(den)>1e-8:
             t=float((p-a)@n/den);q=a+t*(b-a)
