@@ -5,7 +5,7 @@ artifacts = ["/app/output", "/var/lib/rope/export"]
 
 [task]
 name = "robotics-bench/helical-rope-wrap"
-description = "Wrap a flexible rope twice into a helical cylinder groove by pulling only its free endpoint with a force-limited Cartesian end effector, using rendered vision and proprioception."
+description = "Infer an upright helical fixture frame and winding handedness from calibrated RGB views, then wrap a flexible rope twice into its groove using a force-limited Cartesian endpoint and proprioception."
 authors = [{ name = "Rick Ray", email = "192702453+msnsdfl@users.noreply.github.com" }, { name = "Maofei Li", email = "148881440+StoicLee@users.noreply.github.com" }]
 keywords = ["manipulation", "mujoco", "deformable", "rope", "online-control"]
 

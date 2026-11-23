@@ -13,7 +13,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0,
+      0
+    ],
+    "yaw": 0.0,
+    "handedness": 1
   },
   {
     "task": "helical-rope-wrap",
@@ -29,7 +35,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0.04,
+      -0.04
+    ],
+    "yaw": 0.5235987755982988,
+    "handedness": 1
   },
   {
     "task": "helical-rope-wrap",
@@ -45,7 +57,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      -0.04,
+      -0.04
+    ],
+    "yaw": -0.5235987755982988,
+    "handedness": 1
   },
   {
     "task": "helical-rope-wrap",
@@ -61,7 +79,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0.04,
+      0.04
+    ],
+    "yaw": -0.5235987755982988,
+    "handedness": 1
   },
   {
     "task": "helical-rope-wrap",
@@ -77,7 +101,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      -0.04,
+      0.04
+    ],
+    "yaw": 0.5235987755982988,
+    "handedness": 1
   },
   {
     "task": "helical-rope-wrap",
@@ -93,7 +123,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0.04,
+      -0.04
+    ],
+    "yaw": -0.5235987755982988,
+    "handedness": -1
   },
   {
     "task": "helical-rope-wrap",
@@ -109,7 +145,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      -0.04,
+      -0.04
+    ],
+    "yaw": 0.5235987755982988,
+    "handedness": -1
   },
   {
     "task": "helical-rope-wrap",
@@ -125,7 +167,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0.04,
+      0.04
+    ],
+    "yaw": 0.5235987755982988,
+    "handedness": -1
   },
   {
     "task": "helical-rope-wrap",
@@ -141,7 +189,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      -0.04,
+      0.04
+    ],
+    "yaw": -0.5235987755982988,
+    "handedness": -1
   },
   {
     "task": "helical-rope-wrap",
@@ -157,7 +211,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0.02038775239928193,
+      0.03179853198812337
+    ],
+    "yaw": 0.16229681436112683,
+    "handedness": -1
   },
   {
     "task": "helical-rope-wrap",
@@ -173,7 +233,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      -0.02720700968897715,
+      0.025026477909372825
+    ],
+    "yaw": -0.43059974271224133,
+    "handedness": 1
   },
   {
     "task": "helical-rope-wrap",
@@ -189,7 +255,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0.02825149320209925,
+      -0.008909382977510826
+    ],
+    "yaw": -0.32894298156603397,
+    "handedness": -1
   },
   {
     "task": "helical-rope-wrap",
@@ -205,7 +277,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0.012358300673544383,
+      -0.034092639028484424
+    ],
+    "yaw": -0.0790496432698855,
+    "handedness": 1
   },
   {
     "task": "helical-rope-wrap",
@@ -221,7 +299,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      -0.018266607089482304,
+      -0.031140699580873912
+    ],
+    "yaw": 0.3181761782244176,
+    "handedness": -1
   },
   {
     "task": "helical-rope-wrap",
@@ -237,7 +321,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      -0.01744586447349639,
+      -0.0026667394274923345
+    ],
+    "yaw": -0.18150250584687463,
+    "handedness": 1
   },
   {
     "task": "helical-rope-wrap",
@@ -253,7 +343,13 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0.03590955141824887,
+      0.020641766352747143
+    ],
+    "yaw": -0.47078849036412135,
+    "handedness": -1
   },
   {
     "task": "helical-rope-wrap",
@@ -269,6 +365,12 @@
     "budgets": {
       "actions": 800,
       "observations": 1000
-    }
+    },
+    "center_xy": [
+      0.025786144652364597,
+      0.02056157563045423
+    ],
+    "yaw": 0.503471427750006,
+    "handedness": 1
   }
 ]

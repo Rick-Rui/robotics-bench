@@ -55,14 +55,20 @@ class Rope(Episode):
 
     def describe(self):
         return {'limits':sim.LIMITS,'max_step_m':sim.MAX_STEP_M,
-                'camera':{'width':640,'height':480,'fovy_deg':35,'position':[0,-.7,.17],
-                          'right':[1,0,0],'up':[0,0,1],'marker_y':-.03},
+                'cameras':self.sim.cameras(),'markers':sim.marker_contract(),
+                'image_convention':{'encoding':'base64 PNG RGB','pixel_origin':'top-left',
+                                    'u':'right','v':'down','camera_forward':'into scene',
+                                    'views':'front and top at the same simulation instant',
+                                    'observation_cost':1},
                 'core_radius_m':.08,'rope_radius_m':.004,'turns':2}
 
     @op(budget='observations',record=False)
     def observe(self,body):
+        images=body.get('images',True)
+        if type(images) is not bool:
+            raise BadRequest('images must be a boolean')
         try:
-            return self.sim.observe()
+            return self.sim.observe(images=images)
         except Exception as error:
             self.fail('observe',body,error)
 

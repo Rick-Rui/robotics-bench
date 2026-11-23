@@ -4,7 +4,8 @@
     from client import Client
     g = Client()
     g.info()                 # budgets, workspace and camera calibration
-    g.observe()              # RGB, image marker pixels, hand position/velocity and motor force
+    g.observe()              # calibrated front/top RGB views, hand position/velocity and motor force
+    g.observe(images=False)  # same proprioception without images; same observation cost
     g.move(x, y, z)          # ramp the hand target for 0.1 simulated seconds
     g.finish()               # end the episode
 Every answer is a dict with "ok"; a refused request has "refused": [reasons] and nothing moved.
@@ -44,8 +45,8 @@ class Client:
     def info(self):
         return self.call("info")
 
-    def observe(self):
-        return self.call("observe")
+    def observe(self, images=True):
+        return self.call("observe", {"images": images})
 
     def move(self, x, y, z):
         return self.call("move", {"target": [float(x), float(y), float(z)]})
