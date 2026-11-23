@@ -1,4 +1,4 @@
-﻿== frozen layouts (16) ==
+== frozen layouts (16) ==
   L00 hx=-0.120 hy=0.020 len=0.500 -> success=True stable=8.89 max_swing=0.302 act=439 obs=314 replay=True
   L01 hx=+0.120 hy=0.060 len=0.500 -> success=True stable=7.50 max_swing=0.316 act=427 obs=303 replay=True
   L02 hx=-0.120 hy=0.060 len=0.500 -> success=True stable=4.19 max_swing=0.304 act=396 obs=272 replay=True
