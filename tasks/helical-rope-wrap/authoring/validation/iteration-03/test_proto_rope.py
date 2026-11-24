@@ -564,7 +564,7 @@ def main():
         if f'{kind}_total' in t:
             ok = ok and t[f'{kind}_pass'] == 0
     summary['all_checks_pass'] = bool(ok)
-    Path(SUMMARY).write_text(json.dumps(summary, indent=2) + '\n')
+    Path(SUMMARY).write_bytes((json.dumps(summary, indent=2) + '\n').encode('utf-8'))
     print(f'\n{"ALL CHECKS PASS" if ok else "CHECKS FAILED"} -> {SUMMARY}')
     return 0 if ok else 1
 

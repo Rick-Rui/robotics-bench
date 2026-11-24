@@ -160,7 +160,7 @@ class Sim:
         for i in range(self.n):
             pos=self.anchor if i==0 else [0,self.seg,0]
             rot=root_rotation if i==0 else ''
-            xml.append(f'<body name="rope{i}" pos="{vec(pos)}"{rot}><joint type="ball" damping="{.0004*self.n/80}" stiffness="{scene.get("stiffness", .00005)*self.n/80}"/>')
+            xml.append(f'<body name="rope{i}" pos="{vec(pos)}"{rot}><joint type="ball" armature="5e-5" damping="{.0004*self.n/80}" stiffness="{scene.get("stiffness", .00005)*self.n/80}"/>')
             xml.append(f'<geom name="link{i}" type="capsule" fromto="0 0 0 0 {self.seg} 0" size="{self.rr}" mass="{.16/self.n}" rgba=".9 .7 .1 1"/>')
             xml.append(f'<site name="node{i}" size=".001"/>')
         xml.append(f'<site name="end" pos="0 {self.seg} 0"/>')
@@ -168,7 +168,7 @@ class Sim:
         xml.append('</worldbody>')
         xml.append(f'<contact><exclude body1="hand" body2="rope{self.n-1}"/>'
                    f'<exclude body1="hand" body2="rope{self.n-2}"/></contact>')
-        xml.append('<equality><connect site1="end" site2="grip" solref=".004 1"/></equality><actuator>')
+        xml.append('<equality><connect site1="end" site2="grip" solref=".010 1"/></equality><actuator>')
         for ax in 'xyz':
             xml.append(f'<position joint="hand_{ax}" kp="1200" kv="25" forcerange="-12 12"/>')
         xml.append('</actuator></mujoco>')
