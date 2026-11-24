@@ -228,7 +228,7 @@ def main():
                                         'chain_support':v['chain_support']} for k,v in allr
                                      if not v['success'] and not v.get('aborted')}}
     out=HERE/'proto_ring_summary.json'
-    out.write_text(json.dumps(summary,indent=1),encoding='utf-8')
+    out.write_text(json.dumps(summary,indent=1),encoding='utf-8',newline='\n')
     print('summary ->',out.name)
     allok=(nfr==len(frozen) and nun==len(unseen) and n1==0 and n2==0 and n3==0)
     print('ALL CHECKS PASS' if allok else 'CHECKS FAILED')
